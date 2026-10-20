@@ -1,6 +1,50 @@
-const app = require("express")
+/**
+ * Express application factory. Mounts security middleware, sessions,
+ * the API routers and the centralized error handlers.
+ *
+ * @module app
+ */
+const express = require('express');
+const helmet = require('helmet');
+const cors = require('cors');
+const cookieParser = require('cookie-parser');
+const config = require('./config/env');
+const { sessionOptions } = require('./config/session');
+const requestContext = require('./middlewares/requestContext');
+const { errorHandler, notFoundHandler } = require('./middlewares/errorHandler');
+const apiRouter = require('./routes');
+const webhooksRouter = require('./routes/webhooks');
 
+function createApp() {
+  const app = express();
 
+  // Behind a reverse proxy in production (Docker/nginx).
+  app.set('trust proxy', 1);
+  app.disable('x-powered-by');
 
+  app.use(helmet());
+  app.use(
+    cors({
+      origin: config.isProduction ? config.frontendOrigin : true, // dev: allow the Vite origin (credentials)
+      credentials: true,
+    })
+  );
+  app.use(express.json({ limit: '1mb' }));
+  app.use(cookieParser());
+  app.use(require('express-session')(sessionOptions()));
+  app.use(requestContext);
 
-export default app
+  app.get('/api/v1/health', (req, res) => {
+    res.json({ data: { status: 'ok', time: new Date().toISOString() } });
+  });
+
+  app.use('/api/v1/webhooks', webhooksRouter);
+  app.use('/api/v1', apiRouter);
+
+  app.use(notFoundHandler);
+  app.use(errorHandler);
+
+  return app;
+}
+
+module.exports = createApp;

@@ -1,8 +1,31 @@
+# Environment / secrets
 .env
-/node_module
-*.pdf
-*.jpg
-*.jpeg
-*.docx
-*.txt
+.env.*
+!.env.example
 
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+dist-ssr/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Editor / OS
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+
+# Test / coverage
+coverage/
+
+# Temporary files
+tmp/
+*.local
+
+# Keep idea.txt and the exercise PDF tracked (they are project deliverables)
