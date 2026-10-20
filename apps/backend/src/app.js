@@ -11,6 +11,7 @@ const cookieParser = require('cookie-parser');
 const config = require('./config/env');
 const { sessionOptions } = require('./config/session');
 const requestContext = require('./middlewares/requestContext');
+const { requireCsrf } = require('./middlewares/auth');
 const { errorHandler, notFoundHandler } = require('./middlewares/errorHandler');
 const apiRouter = require('./routes');
 const webhooksRouter = require('./routes/webhooks');
@@ -39,6 +40,9 @@ function createApp() {
   });
 
   app.use('/api/v1/webhooks', webhooksRouter);
+  // CSRF protection for browser-facing state-changing routes. Webhooks are
+  // authenticated by their own shared secret and are mounted above this.
+  app.use('/api/v1', requireCsrf);
   app.use('/api/v1', apiRouter);
 
   app.use(notFoundHandler);

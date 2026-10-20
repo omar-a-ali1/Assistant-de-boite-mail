@@ -8,7 +8,10 @@
 const express = require('express');
 const crypto = require('node:crypto');
 const config = require('../config/env');
-const { HTTP_REQUESTS } = require('../config/system');
+const validate = require('../middlewares/validation.middleware');
+const schemas = require('../validation/schemas');
+const { webhookLimiter } = require('../middlewares/rateLimit');
+const webhookController = require('../controllers/webhook.controller');
 
 const router = express.Router();
 
@@ -19,7 +22,6 @@ function requireWebhookSecret(req, res, next) {
   const a = crypto.createHash('sha256').update(provided).digest();
   const b = crypto.createHash('sha256').update(expected).digest();
   if (!provided || !crypto.timingSafeEqual(a, b)) {
-    const http = HTTP_REQUESTS[401];
     return res.status(401).json({
       error: { code: 'UNAUTHORIZED', message: 'Invalid webhook secret.', details: [] },
     });
@@ -27,7 +29,23 @@ function requireWebhookSecret(req, res, next) {
   next();
 }
 
+router.use(webhookLimiter);
 router.use(requireWebhookSecret);
+
+router.get('/sync/state', webhookController.getSyncState);
+router.post('/sync/import', validate(schemas.importBatch), webhookController.importEmails);
+router.post('/sync/run', validate(schemas.syncRunReport), webhookController.syncRun);
+
+router.get('/classification/pending', webhookController.pendingClassifications);
+router.post(
+  '/classification/results',
+  validate(schemas.classificationBatch),
+  webhookController.saveClassifications
+);
+
+router.post('/reply/outcome', validate(schemas.replyOutcome), webhookController.replyOutcome);
+
+router.post('/workflow/failure', validate(schemas.workflowFailure), webhookController.workflowFailure);
 
 module.exports = router;
 module.exports.requireWebhookSecret = requireWebhookSecret;
