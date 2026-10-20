@@ -1,0 +1,27 @@
+import apiClient from './apiClient'
+
+export const authApi = {
+  login: (email, password) => apiClient.post('/auth/login', { email, password }),
+  logout: () => apiClient.post('/auth/logout'),
+  me: () => apiClient.get('/auth/me'),
+}
+
+export const emailApi = {
+  list: (params = {}) => apiClient.get('/emails', { params }),
+  thread: (id) => apiClient.get(`/threads/${id}`),
+  summary: (date) => apiClient.get('/summary', { params: { date } }),
+}
+
+export const draftApi = {
+  create: (emailId, tone) => apiClient.post(`/emails/${emailId}/draft`, { tone }),
+  update: (draftId, body, tone) => apiClient.patch(`/drafts/${draftId}`, { body, ...(tone ? { tone } : {}) }),
+}
+
+export const replyApi = {
+  submit: (emailId, payload, idempotencyKey) =>
+    apiClient.post(`/emails/${emailId}/reply`, payload, {
+      headers: { 'Idempotency-Key': idempotencyKey },
+    }),
+  status: (id) => apiClient.get(`/replies/${id}`),
+  retry: (id) => apiClient.post(`/replies/${id}/retry`),
+}
