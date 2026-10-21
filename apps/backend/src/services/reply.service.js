@@ -21,7 +21,9 @@ const emailModel = require('../models/email.model');
 const threadModel = require('../models/thread.model');
 const draftModel = require('../models/draft.model');
 const auditModel = require('../models/audit.model');
+const userModel = require('../models/user.model');
 const n8n = require('./n8n.service');
+const mailService = require('./mail.service');
 const AppError = require('../lib/errors/AppError');
 const { HTTP_REQUESTS } = require('../config/system');
 const logger = require('../utils/logger');
@@ -52,17 +54,17 @@ function fingerprint(payload) {
  * @returns {Promise<{reply: object, reused: boolean}>}
  */
 async function submitReply({ emailId, idempotencyKey, body, draftId, userId }) {
-  const email = await emailModel.findById(emailId);
+  const email = await emailModel.findById(emailId, userId);
   if (!email) throw new AppError(HTTP_REQUESTS[404].code, 'Email not found.', 404);
 
-  const thread = await threadModel.findById(email.thread_id);
+  const thread = await threadModel.findById(email.thread_id, userId);
   if (!thread) throw new AppError(HTTP_REQUESTS[404].code, 'Thread not found.', 404);
 
   // Resolve final body: explicit body or the saved draft.
   let finalBody = body;
   let resolvedDraftId = draftId || null;
   if (draftId) {
-    const draft = await draftModel.findById(draftId);
+    const draft = await draftModel.findById(draftId, userId);
     if (!draft) throw new AppError(HTTP_REQUESTS[404].code, 'Draft not found.', 404);
     if (draft.thread_id !== email.thread_id) {
       throw new AppError(HTTP_REQUESTS[422].code, 'Draft does not belong to this thread.', 422);
@@ -81,10 +83,10 @@ async function submitReply({ emailId, idempotencyKey, body, draftId, userId }) {
     // The transaction-scoped advisory lock guarantees only one transaction
     // can create the operation; others wait, then see the existing record.
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
-      `${OPERATION_TYPE}:${idempotencyKey}`,
+      `${OPERATION_TYPE}:${userId}:${idempotencyKey}`,
     ]);
 
-    const existingRecord = await replyModel.findIdempotencyRecord(idempotencyKey, OPERATION_TYPE);
+    const existingRecord = await replyModel.findIdempotencyRecord(idempotencyKey, OPERATION_TYPE, userId);
 
     if (existingRecord) {
       if (existingRecord.request_fingerprint !== fp) {
@@ -94,12 +96,13 @@ async function submitReply({ emailId, idempotencyKey, body, draftId, userId }) {
           409
         );
       }
-      const existingReply = await replyModel.findById(existingRecord.result_reference);
+      const existingReply = await replyModel.findById(existingRecord.result_reference, userId);
       return { reply: existingReply, reused: true };
     }
 
     const record = await replyModel.insertIdempotencyRecord({
       client,
+      userId,
       key: idempotencyKey,
       operationType: OPERATION_TYPE,
       resourceType: 'email',
@@ -109,6 +112,7 @@ async function submitReply({ emailId, idempotencyKey, body, draftId, userId }) {
 
     const created = await replyModel.insert({
       client,
+      userId,
       threadId: email.thread_id,
       originalEmailId: email.id,
       draftId: resolvedDraftId,
@@ -120,7 +124,8 @@ async function submitReply({ emailId, idempotencyKey, body, draftId, userId }) {
       idempotencyKey,
       OPERATION_TYPE,
       { status: 'COMPLETED', resultReference: created.id },
-      client
+      client,
+      userId
     );
 
     // Mark the source email as replied-to-in-progress.
@@ -142,19 +147,28 @@ async function submitReply({ emailId, idempotencyKey, body, draftId, userId }) {
 
   // Dispatch only for a freshly created operation. Never resubmit blindly.
   if (!reused) {
-    await dispatch(reply, {
-      gmailThreadId: thread.gmail_thread_id,
-      gmailMessageId: email.gmail_message_id,
-      to: email.sender,
-      subject: thread.subject,
-    });
+    const user = await userModel.findById(userId);
+    await dispatch(
+      reply,
+      {
+        gmailThreadId: thread.gmail_thread_id,
+        gmailMessageId: email.gmail_message_id,
+        to: email.sender,
+        subject: thread.subject,
+      },
+      user
+    );
   }
 
-  return { reply: await replyModel.findById(reply.id), reused };
+  return { reply: await replyModel.findById(reply.id, userId), reused };
 }
 
-/** Move PENDING -> SENDING and trigger the n8n send workflow. */
-async function dispatch(reply, { gmailThreadId, gmailMessageId, to, subject }) {
+/**
+ * Move PENDING -> SENDING and deliver the reply.
+ * Gmail-connected accounts use their own SMTP credentials; the demo mailbox
+ * keeps using the n8n workflow.
+ */
+async function dispatch(reply, { gmailThreadId, gmailMessageId, to, subject }, user) {
   // Only PENDING replies are eligible. Prevents duplicate dispatch.
   const current = await replyModel.findById(reply.id);
   if (!current || current.status !== 'PENDING') {
@@ -163,6 +177,42 @@ async function dispatch(reply, { gmailThreadId, gmailMessageId, to, subject }) {
   }
 
   await replyModel.updateStatus(reply.id, { status: 'SENDING', incrementAttempt: true });
+
+  if (user && user.gmail_app_password_encrypted) {
+    try {
+      const sent = await mailService.sendGmailReply(user, {
+        to,
+        subject,
+        body: reply.body,
+        inReplyTo: gmailMessageId,
+        references: gmailMessageId ? [gmailMessageId] : [],
+      });
+      await replyModel.updateStatus(reply.id, {
+        status: 'SENT',
+        providerMessageId: sent.providerMessageId,
+      });
+      await emailModel.updateProcessingStatus(reply.original_email_id, 'REPLIED');
+      logger.info('reply_sent_direct', { replyId: reply.id });
+    } catch (err) {
+      const ambiguous = Boolean(err.ambiguous);
+      await replyModel.updateStatus(reply.id, {
+        status: ambiguous ? 'UNKNOWN' : 'FAILED',
+        errorCode: err.code || 'GMAIL_SEND_FAILED',
+        errorMessage: ambiguous
+          ? 'The SMTP connection failed after dispatch; delivery is unknown.'
+          : 'Gmail did not accept the reply.',
+      });
+      if (!ambiguous) {
+        await emailModel.updateProcessingStatus(reply.original_email_id, 'TO_PROCESS');
+      }
+      logger.warn('reply_send_direct_failed', {
+        replyId: reply.id,
+        code: err.code || 'GMAIL_SEND_FAILED',
+        ambiguous,
+      });
+    }
+    return;
+  }
 
   const result = await n8n.triggerSendReply({
     replyId: reply.id,
@@ -272,8 +322,8 @@ async function reconcileStaleSending({ olderThanMinutes = 15 } = {}) {
  * Safe retry: only FAILED is retryable. UNKNOWN must be reconciled first
  * (never blindly resend a possibly-delivered message).
  */
-async function retry(replyId) {
-  const reply = await replyModel.findById(replyId);
+async function retry(replyId, userId) {
+  const reply = await replyModel.findById(replyId, userId);
   if (!reply) throw new AppError(HTTP_REQUESTS[404].code, 'Reply not found.', 404);
 
   if (reply.status === 'SENT') {
@@ -294,19 +344,24 @@ async function retry(replyId) {
   }
 
   await replyModel.updateStatus(replyId, { status: 'PENDING' });
-  const email = await emailModel.findById(reply.original_email_id);
-  const thread = await threadModel.findById(reply.thread_id);
-  await dispatch(reply, {
-    gmailThreadId: thread.gmail_thread_id,
-    gmailMessageId: email.gmail_message_id,
-    to: email.sender,
-    subject: thread.subject,
-  });
-  return replyModel.findById(replyId);
+  const email = await emailModel.findById(reply.original_email_id, userId);
+  const thread = await threadModel.findById(reply.thread_id, userId);
+  const user = await userModel.findById(userId);
+  await dispatch(
+    reply,
+    {
+      gmailThreadId: thread.gmail_thread_id,
+      gmailMessageId: email.gmail_message_id,
+      to: email.sender,
+      subject: thread.subject,
+    },
+    user
+  );
+  return replyModel.findById(replyId, userId);
 }
 
-async function getReply(id) {
-  const reply = await replyModel.findById(id);
+async function getReply(id, userId) {
+  const reply = await replyModel.findById(id, userId);
   if (!reply) throw new AppError(HTTP_REQUESTS[404].code, 'Reply not found.', 404);
   return {
     id: reply.id,

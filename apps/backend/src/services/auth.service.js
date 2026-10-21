@@ -34,7 +34,13 @@ async function authenticate(email, password) {
   if (!ok) {
     throw new AppError(HTTP_REQUESTS[401].code, 'Invalid email or password.', 401);
   }
-  return { id: user.id, email: user.email, displayName: user.display_name };
+  return {
+    id: user.id,
+    email: user.email,
+    displayName: user.display_name,
+    mailboxAddress: user.mailbox_address,
+    gmailConnected: Boolean(user.gmail_app_password_encrypted),
+  };
 }
 
 /**
@@ -42,11 +48,31 @@ async function authenticate(email, password) {
  * CLI. The unique index on the normalized email is the source of truth, so a
  * concurrent duplicate is reported as a stable 409 instead of a 500.
  */
-async function createUser({ email, password, displayName }) {
+async function createUser({
+  email,
+  password,
+  displayName,
+  mailboxAddress,
+  gmailAppPasswordEncrypted,
+  gmailVerifiedAt,
+}) {
   const passwordHash = await hashPassword(password);
   try {
-    const user = await userModel.insert({ email, passwordHash, displayName: displayName || '' });
-    return { id: user.id, email: user.email, displayName: user.display_name };
+    const user = await userModel.insert({
+      email,
+      passwordHash,
+      displayName: displayName || '',
+      mailboxAddress: mailboxAddress || email,
+      gmailAppPasswordEncrypted: gmailAppPasswordEncrypted || null,
+      gmailVerifiedAt: gmailVerifiedAt || null,
+    });
+    return {
+      id: user.id,
+      email: user.email,
+      displayName: user.display_name,
+      mailboxAddress: user.mailbox_address,
+      gmailConnected: Boolean(user.gmail_verified_at),
+    };
   } catch (err) {
     if (err && err.code === '23505') {
       throw new AppError(

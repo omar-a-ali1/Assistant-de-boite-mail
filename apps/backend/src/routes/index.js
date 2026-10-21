@@ -13,6 +13,7 @@ const authRoutes = require('./auth.route');
 const emailRoutes = require('./email.route');
 const draftRoutes = require('./draft.route');
 const replyRoutes = require('./reply.route');
+const mailRoutes = require('./mail.route');
 
 const router = express.Router();
 
@@ -23,5 +24,6 @@ router.use(authRoutes);
 router.use(emailRoutes);
 router.use(draftRoutes);
 router.use(replyRoutes);
+router.use(mailRoutes);
 
 module.exports = router;

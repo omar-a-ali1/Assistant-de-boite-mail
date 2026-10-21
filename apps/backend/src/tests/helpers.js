@@ -48,12 +48,12 @@ async function truncateAll() {
 async function ensureTestUser() {
   const hash = await bcrypt.hash(TEST_PASSWORD, 4);
   const { rows } = await query(
-    `INSERT INTO users (email, password_hash, display_name)
-     VALUES ($1, $2, $3)
+    `INSERT INTO users (email, password_hash, display_name, mailbox_address)
+     VALUES ($1, $2, $3, $4)
      ON CONFLICT (normalize_email(email))
-     DO UPDATE SET password_hash = EXCLUDED.password_hash
+     DO UPDATE SET password_hash = EXCLUDED.password_hash, mailbox_address = EXCLUDED.mailbox_address
      RETURNING id`,
-    [TEST_EMAIL, hash, 'Test User']
+    [TEST_EMAIL, hash, 'Test User', TEST_MAILBOX]
   );
   return rows[0].id;
 }
@@ -70,23 +70,26 @@ async function authAgent(app) {
 
 /** Insert a thread + email directly; returns { threadId, emailId }. */
 async function insertEmail(overrides = {}) {
+  const userRes = await query('SELECT id FROM users WHERE normalize_email(email) = normalize_email($1) LIMIT 1', [TEST_EMAIL]);
+  const userId = overrides.userId || userRes.rows[0].id;
   const thread = await query(
-    `INSERT INTO threads (mailbox_address, gmail_thread_id, subject, latest_message_at)
-     VALUES ($1, $2, $3, now())
-     ON CONFLICT (normalize_email(mailbox_address), gmail_thread_id)
+    `INSERT INTO threads (user_id, mailbox_address, gmail_thread_id, subject, latest_message_at)
+     VALUES ($1, $2, $3, $4, now())
+     ON CONFLICT (user_id, gmail_thread_id)
      DO UPDATE SET updated_at = now()
      RETURNING id`,
-    [TEST_MAILBOX, overrides.gmailThreadId || 'thread-1', overrides.subject || 'Sujet de test']
+    [userId, TEST_MAILBOX, overrides.gmailThreadId || 'thread-1', overrides.subject || 'Sujet de test']
   );
   const threadId = thread.rows[0].id;
   const { rows } = await query(
-    `INSERT INTO emails (mailbox_address, gmail_message_id, thread_id, sender, recipients,
+    `INSERT INTO emails (user_id, mailbox_address, gmail_message_id, thread_id, sender, recipients,
                          subject, body_text, received_at, category, priority, summary,
                          expected_action, processing_status)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-     ON CONFLICT (normalize_email(mailbox_address), gmail_message_id) DO NOTHING
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+     ON CONFLICT (user_id, gmail_message_id) DO NOTHING
      RETURNING id`,
     [
+      userId,
       TEST_MAILBOX,
       overrides.gmailMessageId || `msg-${Date.now()}-${Math.random()}`,
       threadId,

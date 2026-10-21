@@ -8,14 +8,18 @@ const importService = require('../services/import.service');
 const replyService = require('../services/reply.service');
 const emailModel = require('../models/email.model');
 const syncModel = require('../models/sync.model');
+const userModel = require('../models/user.model');
 const auditModel = require('../models/audit.model');
+const AppError = require('../lib/errors/AppError');
 const logger = require('../utils/logger');
 
 /** Return the durable sync checkpoint for a mailbox. */
 async function getSyncState(req, res, next) {
   try {
     const mailbox = req.query.mailbox || config.mailboxAddress;
-    const state = await syncModel.getState(mailbox);
+    const user = await userModel.findByMailbox(mailbox);
+    if (!user) throw new AppError('MAILBOX_NOT_FOUND', 'No account owns this mailbox.', 404);
+    const state = await syncModel.getState(user.id);
     res.json({ data: { mailbox, cursor: state ? state.cursor : null, lastSyncAt: state ? state.last_sync_at : null } });
   } catch (err) {
     next(err);
@@ -26,7 +30,15 @@ async function getSyncState(req, res, next) {
 async function importEmails(req, res, next) {
   try {
     const { mailbox, cursor, executionId, messages } = req.validatedBody;
-    const result = await importService.importBatch({ mailbox, cursor, executionId, messages });
+    const user = await userModel.findByMailbox(mailbox);
+    if (!user) throw new AppError('MAILBOX_NOT_FOUND', 'No account owns this mailbox.', 404);
+    const result = await importService.importBatch({
+      userId: user.id,
+      mailbox,
+      cursor,
+      executionId,
+      messages,
+    });
     res.status(202).json({ data: { ...result, mailbox } });
   } catch (err) {
     next(err);
@@ -94,9 +106,12 @@ async function replyOutcome(req, res, next) {
 async function syncRun(req, res, next) {
   try {
     const body = req.validatedBody;
+    const user = await userModel.findByMailbox(body.mailbox);
+    if (!user) throw new AppError('MAILBOX_NOT_FOUND', 'No account owns this mailbox.', 404);
     let runId = req.get('X-Sync-Run-Id');
     if (!runId) {
       const started = await syncModel.startRun({
+        userId: user.id,
         mailbox: body.mailbox,
         cursorStart: body.cursorStart,
         executionId: body.executionId,

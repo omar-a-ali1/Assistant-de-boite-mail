@@ -22,6 +22,14 @@ const registerLimiter = rateLimit({
   message: { error: { code: 'RATE_LIMITED', message: 'Too many accounts created. Please retry later.', details: [] } },
 });
 
+const mailSyncLimiter = rateLimit({
+  windowMs: 60_000,
+  max: config.isTest ? 1000 : 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: { code: 'RATE_LIMITED', message: 'Too many synchronizations. Please retry later.', details: [] } },
+});
+
 const webhookLimiter = rateLimit({
   windowMs: 60_000,
   max: config.isTest ? 10000 : 300,
@@ -30,4 +38,4 @@ const webhookLimiter = rateLimit({
   message: { error: { code: 'RATE_LIMITED', message: 'Too many requests.', details: [] } },
 });
 
-module.exports = { loginLimiter, registerLimiter, webhookLimiter };
+module.exports = { loginLimiter, registerLimiter, mailSyncLimiter, webhookLimiter };

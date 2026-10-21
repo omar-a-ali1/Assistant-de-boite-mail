@@ -595,12 +595,13 @@ async function seed() {
     // --- demo user (idempotent upsert by normalized email) ---
     const passwordHash = await bcrypt.hash(DEMO_PASSWORD, 10);
     const userRes = await client.query(
-      `INSERT INTO users (email, password_hash, display_name)
-       VALUES ($1, $2, $3)
+      `INSERT INTO users (email, password_hash, display_name, mailbox_address)
+       VALUES ($1, $2, $3, $4)
        ON CONFLICT (normalize_email(email))
-       DO UPDATE SET password_hash = EXCLUDED.password_hash, display_name = EXCLUDED.display_name, updated_at = now()
+       DO UPDATE SET password_hash = EXCLUDED.password_hash, display_name = EXCLUDED.display_name,
+                     mailbox_address = EXCLUDED.mailbox_address, updated_at = now()
        RETURNING id`,
-      [DEMO_EMAIL, passwordHash, 'Compte de démonstration']
+      [DEMO_EMAIL, passwordHash, 'Compte de démonstration', MAILBOX]
     );
     const userId = userRes.rows[0].id;
 
@@ -612,12 +613,12 @@ async function seed() {
       const latest = messages.reduce((acc, m) => (m.days < acc.days ? m : acc), messages[0]);
 
       const threadRes = await client.query(
-        `INSERT INTO threads (mailbox_address, gmail_thread_id, subject, latest_message_at)
-         VALUES ($1, $2, $3, $4)
-         ON CONFLICT (normalize_email(mailbox_address), gmail_thread_id)
+        `INSERT INTO threads (user_id, mailbox_address, gmail_thread_id, subject, latest_message_at)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (user_id, gmail_thread_id)
          DO UPDATE SET subject = EXCLUDED.subject, latest_message_at = EXCLUDED.latest_message_at, updated_at = now()
          RETURNING id`,
-        [MAILBOX, `demo-thread-${thread.key}`, thread.subject, daysAgo(latest.days, latest.hour)]
+        [userId, MAILBOX, `demo-thread-${thread.key}`, thread.subject, daysAgo(latest.days, latest.hour)]
       );
       const threadId = threadRes.rows[0].id;
       threadCount += 1;
@@ -625,12 +626,12 @@ async function seed() {
       for (const m of messages) {
         await client.query(
           `INSERT INTO emails (
-             mailbox_address, gmail_message_id, thread_id, sender, recipients, subject,
+             user_id, mailbox_address, gmail_message_id, thread_id, sender, recipients, subject,
              body_text, received_at, category, priority, summary, expected_action,
              needs_review, processing_status
            )
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-           ON CONFLICT (normalize_email(mailbox_address), gmail_message_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+           ON CONFLICT (user_id, gmail_message_id)
            DO UPDATE SET
              category = EXCLUDED.category,
              priority = EXCLUDED.priority,
@@ -640,6 +641,7 @@ async function seed() {
              processing_status = EXCLUDED.processing_status,
              updated_at = now()`,
           [
+            userId,
             MAILBOX,
             m.id,
             threadId,
@@ -662,10 +664,10 @@ async function seed() {
 
     // --- sync_state row for the configured mailbox (idempotent) ---
     await client.query(
-      `INSERT INTO sync_state (mailbox_address, cursor)
-       VALUES ($1, NULL)
-       ON CONFLICT (normalize_email(mailbox_address)) DO NOTHING`,
-      [MAILBOX]
+      `INSERT INTO sync_state (user_id, mailbox_address, cursor)
+       VALUES ($1, $2, NULL)
+       ON CONFLICT (user_id) DO NOTHING`,
+      [userId, MAILBOX]
     );
 
     // --- one sent reply + one failed reply for UI demonstration (idempotent) ---
@@ -675,10 +677,11 @@ async function seed() {
     if (repliedEmail.rowCount > 0) {
       const { id: emailId, thread_id: threadId } = repliedEmail.rows[0];
       await client.query(
-        `INSERT INTO replies (thread_id, original_email_id, idempotency_key, body, status, sent_at, provider_message_id, attempt_count)
-         VALUES ($1, $2, $3, $4, 'SENT', now(), $5, 1)
-         ON CONFLICT (idempotency_key) DO NOTHING`,
+        `INSERT INTO replies (user_id, thread_id, original_email_id, idempotency_key, body, status, sent_at, provider_message_id, attempt_count)
+         VALUES ($1, $2, $3, $4, $5, 'SENT', now(), $6, 1)
+         ON CONFLICT (user_id, idempotency_key) DO NOTHING`,
         [
+          userId,
           threadId,
           emailId,
           'demo-reply-sent-008',
@@ -694,10 +697,10 @@ async function seed() {
     if (failedEmail.rowCount > 0) {
       const { id: emailId, thread_id: threadId } = failedEmail.rows[0];
       await client.query(
-        `INSERT INTO replies (thread_id, original_email_id, idempotency_key, body, status, error_code, error_message, attempt_count, last_attempt_at)
-         VALUES ($1, $2, $3, $4, 'FAILED', 'PROVIDER_REJECTED', 'The provider rejected the message.', 1, now())
-         ON CONFLICT (idempotency_key) DO NOTHING`,
-        [threadId, emailId, 'demo-reply-failed-006', 'Réponse de démonstration en échec.']
+        `INSERT INTO replies (user_id, thread_id, original_email_id, idempotency_key, body, status, error_code, error_message, attempt_count, last_attempt_at)
+         VALUES ($1, $2, $3, $4, $5, 'FAILED', 'PROVIDER_REJECTED', 'The provider rejected the message.', 1, now())
+         ON CONFLICT (user_id, idempotency_key) DO NOTHING`,
+        [userId, threadId, emailId, 'demo-reply-failed-006', 'Réponse de démonstration en échec.']
       );
     }
 

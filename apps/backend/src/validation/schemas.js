@@ -25,6 +25,25 @@ const register = Joi.object({
   email: Joi.string().trim().lowercase().email().max(254).required(),
   password: Joi.string().min(8).max(200).required(),
   displayName: Joi.string().trim().max(100).allow('').default(''),
+  gmailAppPassword: Joi.string()
+    .trim()
+    .pattern(/^(?:\s*[A-Za-z0-9]\s*){8}$/)
+    .required()
+    .messages({
+      'string.pattern.base':
+        'gmailAppPassword must contain exactly 16 letters or digits (spaces allowed).',
+    }),
+});
+
+const mailConnect = Joi.object({
+  gmailAppPassword: Joi.string()
+    .trim()
+    .pattern(/^(?:\s*[A-Za-z0-9]\s*){16}$/)
+    .required()
+    .messages({
+      'string.pattern.base':
+        'gmailAppPassword must contain exactly 16 letters or digits (spaces allowed).',
+    }),
 });
 
 // --- Email list query ---
@@ -146,6 +165,7 @@ module.exports = {
   uuid,
   login,
   register,
+  mailConnect,
   emailListQuery,
   summaryQuery,
   draftCreate,

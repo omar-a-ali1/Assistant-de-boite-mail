@@ -1,6 +1,7 @@
 /**
  * Parameterized SQL for `emails`, including filter/search/pagination and
- * the aggregate queries backing the daily summary.
+ * the aggregate queries backing the daily summary. Every query is scoped
+ * to an owning user.
  *
  * @module models/email.model
  */
@@ -22,6 +23,7 @@ const SORT_COLUMNS = {
  */
 async function list(filters) {
   const {
+    userId,
     page = 1,
     limit = 20,
     category,
@@ -42,6 +44,7 @@ async function list(filters) {
     where.push(clause.replace('?', `$${params.length}`));
   };
 
+  add('e.user_id = ?', userId);
   if (category) add('e.category = ?', category);
   if (priority) add('e.priority = ?', priority);
   if (status) add('e.processing_status = ?', status);
@@ -56,7 +59,7 @@ async function list(filters) {
     );
   }
 
-  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  const whereSql = `WHERE ${where.join(' AND ')}`;
   const sortExpr = SORT_COLUMNS[sortBy] || SORT_COLUMNS.received_at;
   const dir = String(sortOrder).toLowerCase() === 'asc' ? 'ASC' : 'DESC';
   const offset = (page - 1) * limit;
@@ -84,31 +87,31 @@ async function list(filters) {
   return { rows, total: countRes.rows[0].total };
 }
 
-async function findById(id) {
+async function findById(id, userId) {
   const { rows } = await query(
-    `SELECT id, mailbox_address, gmail_message_id, thread_id, sender, recipients, subject,
+    `SELECT id, user_id, mailbox_address, gmail_message_id, thread_id, sender, recipients, subject,
             body_text, received_at, category, priority, summary, expected_action,
             needs_review, processing_status, created_at, updated_at
-     FROM emails WHERE id = $1 LIMIT 1`,
-    [id]
+     FROM emails WHERE id = $1 AND user_id = $2 LIMIT 1`,
+    [id, userId]
   );
   return rows[0] || null;
 }
 
 /** All messages of a thread, chronological order. */
-async function findByThreadId(threadId) {
+async function findByThreadId(threadId, userId) {
   const { rows } = await query(
     `SELECT id, gmail_message_id, thread_id, sender, recipients, subject, body_text,
             received_at, category, priority, summary, expected_action, needs_review,
             processing_status, created_at
-     FROM emails WHERE thread_id = $1 ORDER BY received_at ASC, created_at ASC`,
-    [threadId]
+     FROM emails WHERE thread_id = $1 AND user_id = $2 ORDER BY received_at ASC, created_at ASC`,
+    [threadId, userId]
   );
   return rows;
 }
 
 /** Aggregate counts by category and by status for a given local date. */
-async function dailyCounts(date) {
+async function dailyCounts(date, userId) {
   const { rows } = await query(
     `SELECT
        COUNT(*)::int AS total,
@@ -127,8 +130,9 @@ async function dailyCounts(date) {
        COUNT(*) FILTER (WHERE priority = 1)::int AS priority_low,
        COUNT(*) FILTER (WHERE needs_review)::int AS needs_review
      FROM emails
-     WHERE received_at >= $1::date AND received_at < ($1::date + interval '1 day')`,
-    [date]
+     WHERE user_id = $2
+       AND received_at >= $1::date AND received_at < ($1::date + interval '1 day')`,
+    [date, userId]
   );
   return rows[0];
 }
@@ -137,17 +141,18 @@ async function dailyCounts(date) {
  * Selection pool for the "top 5 to handle" list: pending/draft emails
  * ordered deterministically by priority, then recency.
  */
-async function priorityCandidates({ date, limit = 5 }) {
+async function priorityCandidates({ date, limit = 5, userId }) {
   const { rows } = await query(
     `SELECT e.id, e.thread_id, e.sender, e.subject, e.received_at, e.category,
             e.priority, e.processing_status, e.needs_review
      FROM emails e
-     WHERE e.processing_status IN ('TO_PROCESS', 'DRAFT_READY')
+     WHERE e.user_id = $3
+       AND e.processing_status IN ('TO_PROCESS', 'DRAFT_READY')
        AND e.priority IS NOT NULL
        AND e.received_at < ($1::date + interval '1 day')
      ORDER BY e.priority DESC, e.needs_review DESC, e.received_at DESC
      LIMIT $2`,
-    [date, limit]
+    [date, limit, userId]
   );
   return rows;
 }
@@ -174,15 +179,22 @@ async function updateProcessingStatus(id, status, client) {
   return rows[0] || null;
 }
 
-/** Emails not yet classified (for the classification workflow). */
-async function findUnclassified({ limit = 20 }) {
+/** Emails not yet classified (for the classification workflow or a user sync). */
+async function findUnclassified({ limit = 20, userId }) {
+  const params = [];
+  let where = 'category IS NULL';
+  if (userId) {
+    params.push(userId);
+    where += ` AND user_id = $${params.length}`;
+  }
+  params.push(limit);
   const { rows } = await query(
-    `SELECT id, subject, body_text, sender, received_at
+    `SELECT id, user_id, subject, body_text, sender, received_at
      FROM emails
-     WHERE category IS NULL
+     WHERE ${where}
      ORDER BY received_at ASC
-     LIMIT $1`,
-    [limit]
+     LIMIT $${params.length}`,
+    params
   );
   return rows;
 }

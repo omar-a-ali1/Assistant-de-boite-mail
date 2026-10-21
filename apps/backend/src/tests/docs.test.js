@@ -42,6 +42,9 @@ describe('API documentation', () => {
         '/emails/{id}/reply',
         '/replies/{id}',
         '/replies/{id}/retry',
+        '/mail/status',
+        '/mail/connect',
+        '/mail/sync',
         '/webhooks/sync/import',
         '/webhooks/reply/outcome',
       ])

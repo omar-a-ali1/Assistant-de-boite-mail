@@ -46,7 +46,7 @@ async function submitReply(req, res, next) {
 
 async function getReply(req, res, next) {
   try {
-    const data = await replyService.getReply(req.validatedParams.id);
+    const data = await replyService.getReply(req.validatedParams.id, req.session.userId);
     res.json({ data });
   } catch (err) {
     next(err);
@@ -55,7 +55,7 @@ async function getReply(req, res, next) {
 
 async function retryReply(req, res, next) {
   try {
-    const reply = await replyService.retry(req.validatedParams.id);
+    const reply = await replyService.retry(req.validatedParams.id, req.session.userId);
     res.json({
       data: { id: reply.id, status: reply.status, attemptCount: reply.attempt_count },
     });

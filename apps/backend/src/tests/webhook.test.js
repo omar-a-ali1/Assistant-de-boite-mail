@@ -4,7 +4,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 const request = require('supertest');
-const { prepareDatabase, createApp, TEST_MAILBOX } = require('./helpers');
+const { prepareDatabase, createApp, ensureTestUser, TEST_MAILBOX } = require('./helpers');
 const { closePool } = require('../config/db');
 
 const SECRET = process.env.N8N_WEBHOOK_SECRET;
@@ -28,6 +28,7 @@ const validBatch = {
 describe('webhook security', () => {
   beforeAll(async () => {
     await prepareDatabase();
+    await ensureTestUser();
     app = createApp();
   });
   afterAll(async () => {

@@ -15,8 +15,9 @@ async function createDraft(req, res, next) {
   try {
     const { id } = req.validatedParams;
     const { tone } = req.validatedBody;
+    const userId = req.session.userId;
 
-    const email = await emailModel.findById(id);
+    const email = await emailModel.findById(id, userId);
     if (!email) throw new AppError(HTTP_REQUESTS[404].code, 'Email not found.', 404);
 
     // Only bounded context is sent to the AI provider.
@@ -26,6 +27,7 @@ async function createDraft(req, res, next) {
     );
 
     const draft = await draftModel.insert({
+      userId,
       threadId: email.thread_id,
       originalEmailId: email.id,
       body: generated.body,
@@ -62,10 +64,11 @@ async function updateDraft(req, res, next) {
     const { id } = req.validatedParams;
     const { body, tone } = req.validatedBody;
 
-    const existing = await draftModel.findById(id);
+    const userId = req.session.userId;
+    const existing = await draftModel.findById(id, userId);
     if (!existing) throw new AppError(HTTP_REQUESTS[404].code, 'Draft not found.', 404);
 
-    const updated = await draftModel.updateBody(id, body, tone);
+    const updated = await draftModel.updateBody(id, body, tone, userId);
     await auditModel.record({
       eventType: 'draft_edited',
       actor: req.session.userId,

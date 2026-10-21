@@ -1,40 +1,40 @@
 /**
- * Parameterized SQL for `sync_state` and `sync_runs`.
+ * Parameterized SQL for `sync_state` and `sync_runs`, scoped per user.
  *
  * @module models/sync.model
  */
 const { query } = require('../config/db');
 
-async function getState(mailbox) {
+async function getState(userId) {
   const { rows } = await query(
-    `SELECT id, mailbox_address, cursor, cursor_updated_at, last_sync_at, created_at, updated_at
-     FROM sync_state WHERE normalize_email(mailbox_address) = normalize_email($1) LIMIT 1`,
-    [mailbox]
+    `SELECT id, user_id, mailbox_address, cursor, cursor_updated_at, last_sync_at, created_at, updated_at
+     FROM sync_state WHERE user_id = $1 LIMIT 1`,
+    [userId]
   );
   return rows[0] || null;
 }
 
 /** Advance the durable cursor (only after a batch is committed). */
-async function advanceCursor({ client, mailbox, cursor }) {
+async function advanceCursor({ client, userId, mailbox, cursor }) {
   const run = client ? client.query.bind(client) : query;
   const { rows } = await run(
-    `INSERT INTO sync_state (mailbox_address, cursor, cursor_updated_at, last_sync_at)
-     VALUES ($1, $2, now(), now())
-     ON CONFLICT (normalize_email(mailbox_address))
+    `INSERT INTO sync_state (user_id, mailbox_address, cursor, cursor_updated_at, last_sync_at)
+     VALUES ($1, $2, $3, now(), now())
+     ON CONFLICT (user_id)
      DO UPDATE SET cursor = EXCLUDED.cursor, cursor_updated_at = now(), last_sync_at = now(), updated_at = now()
      RETURNING id, cursor, cursor_updated_at, last_sync_at`,
-    [mailbox, cursor]
+    [userId, mailbox, cursor]
   );
   return rows[0];
 }
 
-async function startRun({ client, mailbox, cursorStart, executionId }) {
+async function startRun({ client, userId, mailbox, cursorStart, executionId }) {
   const run = client ? client.query.bind(client) : query;
   const { rows } = await run(
-    `INSERT INTO sync_runs (mailbox_address, status, cursor_start, execution_id)
-     VALUES ($1, 'RUNNING', $2, $3)
+    `INSERT INTO sync_runs (user_id, mailbox_address, status, cursor_start, execution_id)
+     VALUES ($1, $2, 'RUNNING', $3, $4)
      RETURNING id, status, cursor_start, started_at`,
-    [mailbox, cursorStart || null, executionId || null]
+    [userId, mailbox, cursorStart || null, executionId || null]
   );
   return rows[0];
 }

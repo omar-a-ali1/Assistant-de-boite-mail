@@ -37,6 +37,8 @@ const User = {
     id: { type: 'string', format: 'uuid' },
     email: { type: 'string', format: 'email' },
     displayName: { type: 'string' },
+    mailboxAddress: { type: 'string', format: 'email' },
+    gmailConnected: { type: 'boolean' },
   },
 };
 
@@ -119,6 +121,7 @@ const openapi = {
     { name: 'E-mails', description: 'Liste, fil de discussion et résumé du jour' },
     { name: 'Brouillons', description: 'Génération IA et édition des brouillons' },
     { name: 'Réponses', description: 'Envoi idempotent et suivi de livraison' },
+    { name: 'Boîte Gmail', description: 'Connexion Gmail et synchronisation IMAP' },
     { name: 'Webhooks n8n', description: 'Appels serveur à serveur protégés par secret' },
   ],
   components: {
@@ -218,11 +221,24 @@ const openapi = {
       },
       RegisterRequest: {
         type: 'object',
-        required: ['email', 'password'],
+        required: ['email', 'password', 'gmailAppPassword'],
         properties: {
-          email: { type: 'string', format: 'email', maxLength: 254 },
+          email: {
+            type: 'string',
+            format: 'email',
+            maxLength: 254,
+            example: 'vous@gmail.com',
+            description: 'Adresse Gmail obligatoire.',
+          },
           password: { type: 'string', minLength: 8, maxLength: 200 },
           displayName: { type: 'string', maxLength: 100 },
+          gmailAppPassword: {
+            type: 'string',
+            example: 'abcd efgh ijkl mnop',
+            description:
+              'Mot de passe d’application Google à 16 caractères (espaces autorisés). ' +
+              'La validation IMAP + SMTP prouve que la boîte existe.',
+          },
         },
       },
       AuthResponse: {
@@ -539,8 +555,10 @@ const openapi = {
         tags: ['Authentification'],
         summary: 'Crée un compte et ouvre une session',
         description:
-          'Inscription publique, limitée par IP. Le compte est connecté immédiatement ' +
-          '(cookie HttpOnly + jeton CSRF). Les comptes partagent la même boîte de démonstration.',
+          'Inscription publique Gmail, limitée par IP. Les identifiants sont vérifiés ' +
+          'auprès de Gmail (IMAP + SMTP) avant création. Le compte est connecté ' +
+          'immédiatement (cookie HttpOnly + jeton CSRF) et sa boîte est synchronisée. ' +
+          'Chaque compte ne voit que sa propre boîte.',
         security: [],
         requestBody: {
           required: true,
@@ -609,6 +627,67 @@ const openapi = {
             },
           },
           401: { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
+    },
+    '/mail/status': {
+      get: {
+        tags: ['Boîte Gmail'],
+        summary: 'État de la boîte Gmail connectée',
+        security: [{ sessionCookie: [] }],
+        responses: {
+          200: { description: 'Boîte, état de connexion et dernière synchronisation.' },
+          401: { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
+    },
+    '/mail/connect': {
+      post: {
+        tags: ['Boîte Gmail'],
+        summary: 'Connecte Gmail à un compte existant',
+        description:
+          'Vérifie le mot de passe d’application par IMAP + SMTP, stocke le secret ' +
+          'chiffré et lance une première synchronisation.',
+        security: [{ sessionCookie: [], csrfToken: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['gmailAppPassword'],
+                properties: {
+                  gmailAppPassword: { type: 'string', example: 'abcd efgh ijkl mnop' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          200: { description: 'Gmail connecté et première synchronisation exécutée.' },
+          400: { $ref: '#/components/responses/ValidationError' },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/CsrfForbidden' },
+          422: errorResponse('Identifiants Gmail refusés (GMAIL_AUTH_FAILED).'),
+          429: { $ref: '#/components/responses/RateLimited' },
+        },
+      },
+    },
+    '/mail/sync': {
+      post: {
+        tags: ['Boîte Gmail'],
+        summary: 'Synchronise la boîte Gmail de l’utilisateur',
+        description:
+          'Importe les messages récents via IMAP, déduplique par utilisateur et ' +
+          'classe un lot borné de messages non classés.',
+        security: [{ sessionCookie: [], csrfToken: [] }],
+        responses: {
+          200: { description: 'Synchronisation terminée (compteurs).' },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/CsrfForbidden' },
+          409: errorResponse('Aucune boîte Gmail connectée (GMAIL_NOT_CONNECTED).'),
+          429: { $ref: '#/components/responses/RateLimited' },
+          502: errorResponse('Gmail n’a pas répondu correctement (GMAIL_SYNC_FAILED).'),
         },
       },
     },

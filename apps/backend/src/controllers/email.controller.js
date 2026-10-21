@@ -32,7 +32,7 @@ function mapEmail(row) {
 async function list(req, res, next) {
   try {
     const q = req.validatedQuery;
-    const { rows, total } = await emailModel.list(q);
+    const { rows, total } = await emailModel.list({ ...q, userId: req.session.userId });
     const totalPages = Math.max(1, Math.ceil(total / q.limit));
     res.json({
       data: rows.map(mapEmail),
@@ -46,13 +46,14 @@ async function list(req, res, next) {
 async function getThread(req, res, next) {
   try {
     const { id } = req.validatedParams;
-    const thread = await threadModel.findById(id);
+    const userId = req.session.userId;
+    const thread = await threadModel.findById(id, userId);
     if (!thread) throw new AppError(HTTP_REQUESTS[404].code, 'Thread not found.', 404);
 
     const [messages, drafts, replies] = await Promise.all([
-      emailModel.findByThreadId(id),
-      draftModel.findByThreadId(id),
-      replyModel.findByThreadId(id),
+      emailModel.findByThreadId(id, userId),
+      draftModel.findByThreadId(id, userId),
+      replyModel.findByThreadId(id, userId),
     ]);
 
     res.json({
@@ -105,7 +106,7 @@ async function getThread(req, res, next) {
 
 async function summary(req, res, next) {
   try {
-    const data = await summaryService.buildSummary(req.validatedQuery.date);
+    const data = await summaryService.buildSummary(req.validatedQuery.date, req.session.userId);
     res.json({ data });
   } catch (err) {
     next(err);

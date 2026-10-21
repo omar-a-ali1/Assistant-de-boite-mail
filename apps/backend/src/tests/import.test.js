@@ -7,7 +7,9 @@ const {
   truncateAll,
   query,
   createApp,
+  ensureTestUser,
   TEST_MAILBOX,
+  TEST_EMAIL,
 } = require('./helpers');
 const { closePool } = require('../config/db');
 
@@ -37,6 +39,7 @@ describe('email import idempotency', () => {
   });
   beforeEach(async () => {
     await truncateAll();
+    await ensureTestUser();
   });
 
   it('imports a new email', async () => {
@@ -81,15 +84,17 @@ describe('email import idempotency', () => {
   });
 
   it('enforces uniqueness at the database level', async () => {
+    const user = await query('SELECT id FROM users WHERE normalize_email(email) = normalize_email($1)', [TEST_EMAIL]);
+    const userId = user.rows[0].id;
     await query(
-      `INSERT INTO threads (mailbox_address, gmail_thread_id, subject) VALUES ($1,'dt','s')`,
-      [TEST_MAILBOX]
+      `INSERT INTO threads (user_id, mailbox_address, gmail_thread_id, subject) VALUES ($1,$2,'dt','s')`,
+      [userId, TEST_MAILBOX]
     );
-    const t = await query('SELECT id FROM threads WHERE gmail_thread_id = $1', ['dt']);
-    const insert = `INSERT INTO emails (mailbox_address, gmail_message_id, thread_id, sender, recipients, subject, body_text, received_at)
-                    VALUES ($1,'dup-msg',$2,'s','[]','sub','body', now())`;
-    await query(insert, [TEST_MAILBOX, t.rows[0].id]);
-    await expect(query(insert, [TEST_MAILBOX, t.rows[0].id])).rejects.toThrow();
+    const t = await query('SELECT id FROM threads WHERE user_id = $1 AND gmail_thread_id = $2', [userId, 'dt']);
+    const insert = `INSERT INTO emails (user_id, mailbox_address, gmail_message_id, thread_id, sender, recipients, subject, body_text, received_at)
+                    VALUES ($1,$2,'dup-msg',$3,'s','[]','sub','body', now())`;
+    await query(insert, [userId, TEST_MAILBOX, t.rows[0].id]);
+    await expect(query(insert, [userId, TEST_MAILBOX, t.rows[0].id])).rejects.toThrow();
   });
 
   it('reuses an existing thread for additional messages', async () => {

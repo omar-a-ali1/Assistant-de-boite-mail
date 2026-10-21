@@ -35,6 +35,8 @@ const schema = Joi.object({
   GMAIL_CLIENT_SECRET: Joi.string().allow('').default(''),
   GMAIL_REDIRECT_URI: Joi.string().uri({ scheme: /https?/ }).allow('').default(''),
   MAILBOX_ADDRESS: Joi.string().email().default('demo@example.com'),
+  MAIL_CREDENTIALS_KEY: Joi.string().allow('').default(''),
+  GMAIL_SYNC_LIMIT: Joi.number().integer().min(1).max(500).default(50),
   LOG_LEVEL: Joi.string().valid('error', 'warn', 'info', 'debug').default('info'),
 })
   .unknown(true) // ignore unrelated OS/shell variables
@@ -89,5 +91,9 @@ module.exports = {
     redirectUri: env.GMAIL_REDIRECT_URI,
   },
   mailboxAddress: env.MAILBOX_ADDRESS,
+  mail: {
+    credentialsKey: env.MAIL_CREDENTIALS_KEY,
+    syncLimit: env.GMAIL_SYNC_LIMIT,
+  },
   logLevel: env.LOG_LEVEL,
 };

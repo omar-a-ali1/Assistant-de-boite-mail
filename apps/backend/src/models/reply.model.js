@@ -1,29 +1,35 @@
 /**
  * Parameterized SQL for `replies` (durable delivery outbox) and
- * `idempotency_records`.
+ * `idempotency_records`, always scoped to an owning user where applicable.
  *
  * @module models/reply.model
  */
 const { query } = require('../config/db');
 
-async function findById(id) {
+async function findById(id, userId) {
+  const params = [id];
+  let userClause = '';
+  if (userId) {
+    params.push(userId);
+    userClause = ` AND user_id = $${params.length}`;
+  }
   const { rows } = await query(
-    `SELECT id, thread_id, original_email_id, draft_id, idempotency_key, body, status,
+    `SELECT id, user_id, thread_id, original_email_id, draft_id, idempotency_key, body, status,
             provider_message_id, error_code, error_message, attempt_count,
             last_attempt_at, created_at, updated_at, sent_at
-     FROM replies WHERE id = $1 LIMIT 1`,
-    [id]
+     FROM replies WHERE id = $1${userClause} LIMIT 1`,
+    params
   );
   return rows[0] || null;
 }
 
-async function findByIdempotencyKey(key) {
+async function findByIdempotencyKey(key, userId) {
   const { rows } = await query(
-    `SELECT id, thread_id, original_email_id, draft_id, idempotency_key, body, status,
+    `SELECT id, user_id, thread_id, original_email_id, draft_id, idempotency_key, body, status,
             provider_message_id, error_code, error_message, attempt_count,
             last_attempt_at, created_at, updated_at, sent_at
-     FROM replies WHERE idempotency_key = $1 LIMIT 1`,
-    [key]
+     FROM replies WHERE idempotency_key = $1 AND user_id = $2 LIMIT 1`,
+    [key, userId]
   );
   return rows[0] || null;
 }
@@ -34,7 +40,7 @@ async function findByIdempotencyKey(key) {
  */
 async function findStaleSending(olderThanMinutes) {
   const { rows } = await query(
-    `SELECT id, thread_id, original_email_id
+    `SELECT id, user_id, thread_id, original_email_id
      FROM replies
      WHERE status = 'SENDING'
        AND COALESCE(last_attempt_at, updated_at) < now() - make_interval(mins => $1)
@@ -44,24 +50,24 @@ async function findStaleSending(olderThanMinutes) {
   return rows;
 }
 
-async function findByThreadId(threadId) {
+async function findByThreadId(threadId, userId) {
   const { rows } = await query(
     `SELECT id, thread_id, original_email_id, draft_id, body, status, provider_message_id,
             error_code, error_message, attempt_count, created_at, updated_at, sent_at
-     FROM replies WHERE thread_id = $1 ORDER BY created_at DESC`,
-    [threadId]
+     FROM replies WHERE thread_id = $1 AND user_id = $2 ORDER BY created_at DESC`,
+    [threadId, userId]
   );
   return rows;
 }
 
-async function insert({ client, threadId, originalEmailId, draftId, idempotencyKey, body }) {
+async function insert({ client, userId, threadId, originalEmailId, draftId, idempotencyKey, body }) {
   const run = client ? client.query.bind(client) : query;
   const { rows } = await run(
-    `INSERT INTO replies (thread_id, original_email_id, draft_id, idempotency_key, body, status)
-     VALUES ($1, $2, $3, $4, $5, 'PENDING')
+    `INSERT INTO replies (user_id, thread_id, original_email_id, draft_id, idempotency_key, body, status)
+     VALUES ($1, $2, $3, $4, $5, $6, 'PENDING')
      RETURNING id, thread_id, original_email_id, draft_id, idempotency_key, body, status,
                attempt_count, created_at, updated_at, sent_at`,
-    [threadId, originalEmailId, draftId || null, idempotencyKey, body]
+    [userId, threadId, originalEmailId, draftId || null, idempotencyKey, body]
   );
   return rows[0];
 }
@@ -87,37 +93,37 @@ async function updateStatus(id, { status, providerMessageId, errorCode, errorMes
 
 // --- Idempotency records ---
 
-async function findIdempotencyRecord(key, operationType) {
+async function findIdempotencyRecord(key, operationType, userId) {
   const { rows } = await query(
-    `SELECT id, idempotency_key, operation_type, resource_type, resource_id,
+    `SELECT id, user_id, idempotency_key, operation_type, resource_type, resource_id,
             request_fingerprint, status, result_reference, created_at, updated_at
      FROM idempotency_records
-     WHERE idempotency_key = $1 AND operation_type = $2
+     WHERE idempotency_key = $1 AND operation_type = $2 AND user_id = $3
      LIMIT 1`,
-    [key, operationType]
+    [key, operationType, userId]
   );
   return rows[0] || null;
 }
 
-async function insertIdempotencyRecord({ client, key, operationType, resourceType, resourceId, fingerprint }) {
+async function insertIdempotencyRecord({ client, userId, key, operationType, resourceType, resourceId, fingerprint }) {
   const run = client ? client.query.bind(client) : query;
   const { rows } = await run(
-    `INSERT INTO idempotency_records (idempotency_key, operation_type, resource_type, resource_id, request_fingerprint)
-     VALUES ($1, $2, $3, $4, $5)
+    `INSERT INTO idempotency_records (user_id, idempotency_key, operation_type, resource_type, resource_id, request_fingerprint)
+     VALUES ($1, $2, $3, $4, $5, $6)
      RETURNING id, idempotency_key, operation_type, resource_type, resource_id, request_fingerprint, status`,
-    [key, operationType, resourceType, resourceId || null, fingerprint]
+    [userId, key, operationType, resourceType, resourceId || null, fingerprint]
   );
   return rows[0];
 }
 
-async function updateIdempotencyRecord(key, operationType, { status, resultReference }, client) {
+async function updateIdempotencyRecord(key, operationType, { status, resultReference }, client, userId) {
   const run = client ? client.query.bind(client) : query;
   const { rows } = await run(
     `UPDATE idempotency_records
      SET status = $3, result_reference = $4, updated_at = now()
-     WHERE idempotency_key = $1 AND operation_type = $2
+     WHERE idempotency_key = $1 AND operation_type = $2 AND user_id = $5
      RETURNING id, status, result_reference`,
-    [key, operationType, status, resultReference || null]
+    [key, operationType, status, resultReference || null, userId]
   );
   return rows[0] || null;
 }

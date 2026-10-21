@@ -38,10 +38,10 @@ function buildReason(email) {
 /**
  * @param {string} date - ISO date (YYYY-MM-DD)
  */
-async function buildSummary(date) {
+async function buildSummary(date, userId) {
   const [counts, candidates] = await Promise.all([
-    emailModel.dailyCounts(date),
-    emailModel.priorityCandidates({ date, limit: 5 }),
+    emailModel.dailyCounts(date, userId),
+    emailModel.priorityCandidates({ date, limit: 5, userId }),
   ]);
 
   return {
