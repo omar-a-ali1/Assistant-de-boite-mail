@@ -13,6 +13,7 @@ const {
   createApp,
 } = require('./helpers');
 const { closePool } = require('../config/db');
+const replyService = require('../services/reply.service');
 
 let app;
 
@@ -203,5 +204,90 @@ describe('reply idempotency and delivery state', () => {
     expect(done.body.data.status).toBe('SENT');
 
     await agent.post(`/api/v1/replies/${replyId}/retry`).set('X-CSRF-Token', csrfToken).expect(409);
+  });
+
+  it('rejects an illegal regression from terminal SENT (409)', async () => {
+    const { agent, csrfToken } = await authAgent(app);
+    const { emailId } = await insertEmail();
+    const res = await agent
+      .post(`/api/v1/emails/${emailId}/reply`)
+      .set('X-CSRF-Token', csrfToken)
+      .set('Idempotency-Key', 'abcdabcd-abcd-4abc-8abc-abcdabcdabcd')
+      .send({ body: 'Déjà envoyé.', confirm: true })
+      .expect(202);
+    const replyId = res.body.data.id;
+
+    await request(app)
+      .post('/api/v1/webhooks/reply/outcome')
+      .set('X-Webhook-Secret', process.env.N8N_WEBHOOK_SECRET)
+      .send({ replyId, status: 'SENT', providerMessageId: 'gmail-1' })
+      .expect(200);
+
+    await request(app)
+      .post('/api/v1/webhooks/reply/outcome')
+      .set('X-Webhook-Secret', process.env.N8N_WEBHOOK_SECRET)
+      .send({ replyId, status: 'FAILED', errorCode: 'LATE' })
+      .expect(409);
+  });
+
+  it('syncs the source email status on SENT and FAILED outcomes', async () => {
+    const { agent, csrfToken } = await authAgent(app);
+    const { emailId } = await insertEmail();
+    const res = await agent
+      .post(`/api/v1/emails/${emailId}/reply`)
+      .set('X-CSRF-Token', csrfToken)
+      .set('Idempotency-Key', 'abcdabcd-abcd-4abc-8abc-abcdabcdabce')
+      .send({ body: 'Statut à synchroniser.', confirm: true })
+      .expect(202);
+    const replyId = res.body.data.id;
+
+    await request(app)
+      .post('/api/v1/webhooks/reply/outcome')
+      .set('X-Webhook-Secret', process.env.N8N_WEBHOOK_SECRET)
+      .send({ replyId, status: 'FAILED', errorCode: 'BOUNCE' })
+      .expect(200);
+    let email = await query('SELECT processing_status FROM emails WHERE id = $1', [emailId]);
+    expect(email.rows[0].processing_status).toBe('TO_PROCESS');
+
+    await request(app)
+      .post('/api/v1/webhooks/reply/outcome')
+      .set('X-Webhook-Secret', process.env.N8N_WEBHOOK_SECRET)
+      .send({ replyId, status: 'SENT', providerMessageId: 'gmail-2' })
+      .expect(200);
+    email = await query('SELECT processing_status FROM emails WHERE id = $1', [emailId]);
+    expect(email.rows[0].processing_status).toBe('REPLIED');
+  });
+
+  it('reconciles replies stuck in SENDING to UNKNOWN (never auto-resent)', async () => {
+    const { agent, csrfToken } = await authAgent(app);
+    const { emailId } = await insertEmail();
+    const res = await agent
+      .post(`/api/v1/emails/${emailId}/reply`)
+      .set('X-CSRF-Token', csrfToken)
+      .set('Idempotency-Key', 'abcdabcd-abcd-4abc-8abc-abcdabcdabcf')
+      .send({ body: 'Bloqué en envoi.', confirm: true })
+      .expect(202);
+    const replyId = res.body.data.id;
+
+    await query(
+      `UPDATE replies
+       SET status = 'SENDING', last_attempt_at = now() - interval '60 minutes'
+       WHERE id = $1`,
+      [replyId]
+    );
+
+    const count = await replyService.reconcileStaleSending({ olderThanMinutes: 15 });
+    expect(count).toBe(1);
+
+    const status = await agent.get(`/api/v1/replies/${replyId}`).expect(200);
+    expect(status.body.data.status).toBe('UNKNOWN');
+    expect(status.body.data.errorCode).toBe('STALE_SENDING');
+    expect(status.body.data.needsReconciliation).toBe(true);
+    expect(status.body.data.retryable).toBe(false);
+
+    await agent
+      .post(`/api/v1/replies/${replyId}/retry`)
+      .set('X-CSRF-Token', csrfToken)
+      .expect(409);
   });
 });

@@ -28,6 +28,22 @@ async function findByIdempotencyKey(key) {
   return rows[0] || null;
 }
 
+/**
+ * Replies stuck in SENDING: the dispatch happened but no delivery outcome was
+ * ever reported. They must be reconciled to UNKNOWN, never resent blindly.
+ */
+async function findStaleSending(olderThanMinutes) {
+  const { rows } = await query(
+    `SELECT id, thread_id, original_email_id
+     FROM replies
+     WHERE status = 'SENDING'
+       AND COALESCE(last_attempt_at, updated_at) < now() - make_interval(mins => $1)
+     ORDER BY updated_at ASC`,
+    [Number(olderThanMinutes)]
+  );
+  return rows;
+}
+
 async function findByThreadId(threadId) {
   const { rows } = await query(
     `SELECT id, thread_id, original_email_id, draft_id, body, status, provider_message_id,
@@ -110,6 +126,7 @@ module.exports = {
   findById,
   findByIdempotencyKey,
   findByThreadId,
+  findStaleSending,
   insert,
   updateStatus,
   findIdempotencyRecord,

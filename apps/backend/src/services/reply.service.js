@@ -28,6 +28,20 @@ const logger = require('../utils/logger');
 
 const OPERATION_TYPE = 'send_reply';
 
+/**
+ * Legal delivery-state transitions. SENT is terminal and may only be
+ * re-reported as SENT (idempotent). UNKNOWN may be resolved by a later
+ * reconciliation outcome. Illegal regressions are rejected so a late or
+ * forged callback can never un-send or resurrect a message.
+ */
+const ALLOWED_TRANSITIONS = {
+  PENDING: ['SENDING', 'SENT', 'FAILED', 'UNKNOWN'],
+  SENDING: ['PENDING', 'SENT', 'FAILED', 'UNKNOWN'],
+  FAILED: ['PENDING', 'SENT', 'FAILED', 'UNKNOWN'],
+  UNKNOWN: ['SENT', 'FAILED', 'UNKNOWN'],
+  SENT: ['SENT'],
+};
+
 function fingerprint(payload) {
   return crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 }
@@ -180,7 +194,7 @@ async function dispatch(reply, { gmailThreadId, gmailMessageId }) {
   // On success we wait for the workflow callback to set SENT/FAILED/UNKNOWN.
 }
 
-/** Apply a delivery outcome reported by n8n. Idempotent. */
+/** Apply a delivery outcome reported by n8n. Idempotent and transition-safe. */
 async function applyOutcome({ replyId, status, providerMessageId, errorCode, errorMessage }) {
   const reply = await replyModel.findById(replyId);
   if (!reply) throw new AppError(HTTP_REQUESTS[404].code, 'Reply not found.', 404);
@@ -190,14 +204,61 @@ async function applyOutcome({ replyId, status, providerMessageId, errorCode, err
     return reply;
   }
 
+  const allowed = ALLOWED_TRANSITIONS[reply.status] || [];
+  if (!allowed.includes(status)) {
+    throw new AppError(
+      'INVALID_TRANSITION',
+      `Cannot transition reply from ${reply.status} to ${status}.`,
+      409
+    );
+  }
+
   const updated = await replyModel.updateStatus(replyId, {
     status,
     providerMessageId,
     errorCode,
     errorMessage,
   });
+
+  // Keep the source email's processing status honest.
+  if (status === 'SENT') {
+    await emailModel.updateProcessingStatus(reply.original_email_id, 'REPLIED');
+  } else if (status === 'FAILED') {
+    // The reply did not go out: surface the email again so the operator can
+    // retry deliberately from the inbox.
+    await emailModel.updateProcessingStatus(reply.original_email_id, 'TO_PROCESS');
+  }
+
+  await auditModel.record({
+    eventType: 'reply_outcome',
+    actor: 'n8n',
+    resourceType: 'reply',
+    resourceId: replyId,
+    metadata: { from: reply.status, to: status, errorCode: errorCode || null },
+  });
+
   logger.info('reply_outcome_applied', { replyId, status });
   return updated;
+}
+
+/**
+ * Reconcile replies left in SENDING without a reported outcome (e.g. a
+ * workflow crash after dispatch). They become UNKNOWN — never auto-resent,
+ * because the message may actually have been delivered.
+ *
+ * @returns {Promise<number>} number of reconciled replies
+ */
+async function reconcileStaleSending({ olderThanMinutes = 15 } = {}) {
+  const stale = await replyModel.findStaleSending(olderThanMinutes);
+  for (const row of stale) {
+    await replyModel.updateStatus(row.id, {
+      status: 'UNKNOWN',
+      errorCode: 'STALE_SENDING',
+      errorMessage: 'No delivery outcome was reported within the expected window.',
+    });
+    logger.warn('reply_stale_sending_reconciled', { replyId: row.id });
+  }
+  return stale.length;
 }
 
 /**
@@ -253,4 +314,12 @@ async function getReply(id) {
   };
 }
 
-module.exports = { submitReply, applyOutcome, retry, getReply, fingerprint, OPERATION_TYPE };
+module.exports = {
+  submitReply,
+  applyOutcome,
+  reconcileStaleSending,
+  retry,
+  getReply,
+  fingerprint,
+  OPERATION_TYPE,
+};

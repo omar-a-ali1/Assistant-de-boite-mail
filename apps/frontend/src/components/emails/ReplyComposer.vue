@@ -92,11 +92,17 @@ async function confirmSend() {
 
 function startPolling(replyId) {
   stopPolling()
+  let ticks = 0
   pollTimer.value = setInterval(async () => {
+    ticks += 1
     try {
       const { data } = await replyApi.status(replyId)
       currentReply.value = data.data
-      if (['SENT', 'FAILED', 'UNKNOWN'].includes(data.data.status)) {
+      const done =
+        ['SENT', 'FAILED', 'UNKNOWN'].includes(data.data.status) ||
+        data.data.errorCode === 'NO_WORKFLOW'
+      // Stop after ~2 minutes to avoid a runaway poll.
+      if (done || ticks >= 48) {
         stopPolling()
         emit('reply-updated')
       }
@@ -159,6 +165,9 @@ const replyStatusVariant = computed(() => {
       </span>
       <span v-else-if="currentReply.status === 'UNKNOWN'" class="text-[var(--color-muted-foreground)]">
         Résultat incertain — réconciliation requise avant tout nouvel envoi.
+      </span>
+      <span v-else-if="currentReply.errorCode === 'NO_WORKFLOW'" class="text-[var(--color-muted-foreground)]">
+        Mode démonstration : aucun workflow d’envoi n’est configuré, le message n’a pas été envoyé.
       </span>
       <span v-else class="text-[var(--color-muted-foreground)]">
         Opération enregistrée, en attente d’envoi.

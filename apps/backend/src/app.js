@@ -9,6 +9,7 @@ const helmet = require('helmet');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const config = require('./config/env');
+const { query } = require('./config/db');
 const { sessionOptions } = require('./config/session');
 const requestContext = require('./middlewares/requestContext');
 const { requireCsrf } = require('./middlewares/auth');
@@ -37,6 +38,18 @@ function createApp() {
 
   app.get('/api/v1/health', (req, res) => {
     res.json({ data: { status: 'ok', time: new Date().toISOString() } });
+  });
+
+  // Readiness: the process is only useful if it can reach PostgreSQL.
+  app.get('/api/v1/health/ready', async (req, res) => {
+    try {
+      await query('SELECT 1');
+      res.json({ data: { status: 'ready', time: new Date().toISOString() } });
+    } catch (err) {
+      res.status(503).json({
+        error: { code: 'NOT_READY', message: 'Database unavailable.', details: [] },
+      });
+    }
   });
 
   app.use('/api/v1/webhooks', webhooksRouter);
