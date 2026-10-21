@@ -112,7 +112,15 @@ docker compose exec backend node database/seed.js
 **Compte de démonstration** : `demo@example.com` / `demo1234`
 
 Un lien **Créer un compte** est disponible sur la page de connexion
-(`/register`). Les comptes créés partagent la boîte de démonstration.
+(`/register`). L'inscription exige une adresse **Gmail** et un **mot de passe
+d'application Google** à 16 caractères (validation en deux étapes activée).
+Chaque compte importe et consulte uniquement sa propre boîte ; les données sont
+isolées par utilisateur. Un compte Gmail existant peut être connecté depuis
+l'application via **Connecter Gmail**.
+
+Pour la production, définissez une clé stable `MAIL_CREDENTIALS_KEY` (32 octets
+en hexadécimal ou base64) : elle chiffre les mots de passe d'application stockés
+(AES-256-GCM). Sans cette variable, la clé est dérivée de `SESSION_SECRET`.
 
 > Si le port 5432 est déjà utilisé, mettez `POSTGRES_PORT=5433` dans `.env`.
 
@@ -184,7 +192,7 @@ npm test
 Couverture backend : import idempotent, concurrence et conflit d'idempotence,
 machine à états d'envoi, réconciliation `SENDING → UNKNOWN`, secret de webhook
 (absent/erroné), validation de sortie IA, authentification/CSRF, API.
-**54 tests backend + 5 tests frontend**.
+**69 tests backend + 8 tests frontend**.
 
 ## Workflows n8n
 
@@ -194,8 +202,10 @@ locale **GreenMail** (`demo@example.com` / `demo1234`) : aucun secret n'est
 nécessaire. Voir [`n8n/README.md`](n8n/README.md) pour l'import, les variables
 d'environnement et l'ordre d'activation.
 `node n8n/scripts/apply-mail.js` importe les credentials et publie les
-workflows en mode local par défaut ; pour un vrai Gmail, renseigner
-`MAIL_MODE=gmail`, `MAILBOX_ADDRESS` et `GMAIL_APP_PASSWORD`.
+workflows en mode local par défaut ; pour un vrai Gmail partagé (mode hérité),
+renseigner `MAIL_MODE=gmail`, `MAILBOX_ADDRESS` et `GMAIL_APP_PASSWORD`.
+Les comptes utilisateurs connectés à Gmail sont synchronisés et répondent
+directement depuis le backend (IMAP/SMTP), sans dépendre de n8n.
 
 Si les workflows restent inactifs, l'application est toujours utilisable et
 n'affiche jamais un envoi comme réussi (statut `NO_WORKFLOW` explicite).
@@ -204,6 +214,8 @@ n'affiche jamais un envoi comme réussi (statut `NO_WORKFLOW` explicite).
 
 - Mots de passe hachés avec bcrypt ; secrets uniquement en variables
   d'environnement (`.env` ignoré par Git).
+- Mots de passe d'application Gmail chiffrés au repos (AES-256-GCM) et jamais
+  renvoyés par l'API ni écrits dans les logs.
 - Sessions serveur en base, cookie `HttpOnly` ; jeton CSRF exigé sur toute
   requête mutante (`X-CSRF-Token`).
 - Webhooks protégés par `X-Webhook-Secret` comparé à temps constant.
@@ -236,11 +248,12 @@ n'affiche jamais un envoi comme réussi (statut `NO_WORKFLOW` explicite).
 
 ## Limites connues
 
-- L'inscription est ouverte et limitée par IP ; les comptes partagent la même
-  boîte de démonstration (pas d'isolation multi-utilisateur).
-- La boîte locale GreenMail permet la synchronisation IMAP et l'envoi SMTP
-  sans secret. Un vrai compte Gmail reste optionnel (`MAIL_MODE=gmail`) et
-  nécessite un **mot de passe d'application**.
+- L'inscription est ouverte et limitée par IP ; elle exige une adresse Gmail et
+  un **mot de passe d'application** Google. Les données sont isolées par
+  utilisateur, avec une seule boîte par compte.
+- La boîte locale GreenMail reste disponible pour le compte de démonstration
+  (`demo@example.com`). Un compte Gmail réel nécessite la validation en deux
+  étapes et un mot de passe d'application à 16 caractères.
 - La classification IA par défaut (`AI_PROVIDER=mock`) est déterministe et
   hors ligne ; `AI_PROVIDER=groq` active un modèle réel avec une clé.
 - Le conteneur frontend lance le serveur de développement Vite ; pour la

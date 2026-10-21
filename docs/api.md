@@ -9,11 +9,11 @@ La spécification OpenAPI 3 est servie par le backend :
 - Swagger UI : http://localhost:4000/swagger-docs
 - JSON brut : http://localhost:4000/swagger-docs.json
 
-Elle couvre l'authentification, les e-mails, les brouillons, les réponses et
-les sept webhooks n8n, avec les schémas de requête/réponse et les exigences de
-sécurité (cookie de session, CSRF, `Idempotency-Key`, `X-Webhook-Secret`).
-Les routes sont découpées par ressource dans
-`apps/backend/src/routes/{auth,email,draft,reply}.route.js`.
+Elle couvre l'authentification, la boîte Gmail, les e-mails, les brouillons,
+les réponses et les webhooks n8n, avec les schémas de requête/réponse et les
+exigences de sécurité (cookie de session, CSRF, `Idempotency-Key`,
+`X-Webhook-Secret`). Les routes sont découpées par ressource dans
+`apps/backend/src/routes/{auth,mail,email,draft,reply}.route.js`.
 
 ## Conventions
 
@@ -21,7 +21,7 @@ Les routes sont découpées par ressource dans
 - Erreur : `{ "error": { "code": "...", "message": "...", "details": [] } }`.
 - Authentification : cookie de session `usts_sid` (posé par `/auth/login`).
 - Requêtes mutantes (`POST`, `PATCH`, `DELETE`) : en-tête `X-CSRF-Token`
-  obligatoire (sauf `/auth/login`).
+  obligatoire (sauf `/auth/login` et `/auth/register`).
 - Réponses d'envoi : en-tête `Idempotency-Key` obligatoire.
 
 ### Codes d'erreur usuels
@@ -29,6 +29,8 @@ Les routes sont découpées par ressource dans
 | Code HTTP | `code` | Sens |
 | --- | --- | --- |
 | 400 | `VALIDATION_ERROR` | Corps/paramètres invalides |
+| 400 | `GMAIL_ACCOUNT_REQUIRED` | L'adresse du compte n'est pas Gmail |
+| 400 | `GMAIL_APP_PASSWORD_INVALID` | Mot de passe d'application ≠ 16 caractères |
 | 400 | `IDEMPOTENCY_KEY_REQUIRED` | En-tête d'idempotence absent ou invalide |
 | 401 | `UNAUTHORIZED` | Session absente ou expirée |
 | 403 | `CSRF` | Jeton CSRF absent ou invalide |
@@ -37,7 +39,9 @@ Les routes sont découpées par ressource dans
 | 409 | `INVALID_TRANSITION` | Transition d'état d'envoi interdite |
 | 409 | `RECONCILIATION_REQUIRED` | Envoi `UNKNOWN`, à réconcilier |
 | 409 | `NOT_RETRYABLE` | Réponse non réessayable |
+| 409 | `GMAIL_NOT_CONNECTED` | Aucune boîte Gmail connectée à ce compte |
 | 422 | `UNPROCESSABLE_ENTITY` | Brouillon d'un autre fil |
+| 422 | `GMAIL_AUTH_FAILED` | Gmail refuse l'adresse ou le mot de passe d'application |
 | 429 | `RATE_LIMITED` | Trop de tentatives |
 | 503 | `NOT_READY` | Base indisponible |
 
@@ -57,25 +61,44 @@ Vérifie la connexion PostgreSQL. `200` si prêt, `503` sinon.
 
 ### `POST /auth/register`
 
-Crée un compte et ouvre immédiatement une session.
+Crée un compte Gmail, vérifie le mot de passe d'application, importe les
+derniers messages et ouvre immédiatement une session. L'adresse doit être
+`@gmail.com` ou `@googlemail.com`.
 
 ```json
-{ "email": "vous@exemple.fr", "password": "mot-de-passe-solide", "displayName": "Votre Nom" }
+{
+  "email": "vous@gmail.com",
+  "password": "mot-de-passe-solide",
+  "displayName": "Votre Nom",
+  "gmailAppPassword": "abcd efgh ijkl mnop"
+}
 ```
+
+Le mot de passe d'application contient exactement 16 caractères alphanumériques
+(les espaces sont ignorés). Il est vérifié par IMAP et SMTP puis stocké chiffré
+(AES-256-GCM).
 
 `201`
 
 ```json
 {
   "data": {
-    "user": { "id": "…", "email": "vous@exemple.fr", "displayName": "Votre Nom" },
-    "csrfToken": "…"
+    "user": {
+      "id": "…",
+      "email": "vous@gmail.com",
+      "displayName": "Votre Nom",
+      "mailboxAddress": "vous@gmail.com",
+      "gmailConnected": true
+    },
+    "csrfToken": "…",
+    "initialSync": { "imported": 12, "skipped": 0, "classified": 12 }
   }
 }
 ```
 
-Erreurs : `400 VALIDATION_ERROR`, `409 EMAIL_ALREADY_EXISTS`,
-`429 RATE_LIMITED`.
+Erreurs : `400 VALIDATION_ERROR`, `400 GMAIL_ACCOUNT_REQUIRED`,
+`400 GMAIL_APP_PASSWORD_INVALID`, `409 EMAIL_ALREADY_EXISTS`,
+`422 GMAIL_AUTH_FAILED`, `429 RATE_LIMITED`.
 
 ### `POST /auth/login`
 
@@ -101,6 +124,61 @@ Détruit la session. Requiert le jeton CSRF. `{ "data": { "ok": true } }`.
 ### `GET /auth/me`
 
 Retourne l'utilisateur courant et le jeton CSRF. `401` si non authentifié.
+
+## Boîte Gmail
+
+Toutes les routes exigent une session. Chaque utilisateur ne voit et ne
+synchronise que sa propre boîte.
+
+### `GET /mail/status`
+
+```json
+{
+  "data": {
+    "mailbox": "vous@gmail.com",
+    "gmailConnected": true,
+    "verifiedAt": "2026-10-21T10:00:00.000Z",
+    "lastSyncAt": "2026-10-21T10:05:00.000Z"
+  }
+}
+```
+
+### `POST /mail/connect`
+
+Connecte Gmail à un compte Gmail existant qui n'a pas encore de mot de passe
+d'application (par exemple un compte créé avant cette fonctionnalité). Le
+mot de passe est vérifié, chiffré, puis une première synchronisation de 25
+messages est lancée. Requiert le jeton CSRF.
+
+```json
+{ "gmailAppPassword": "abcd efgh ijkl mnop" }
+```
+
+```json
+{
+  "data": {
+    "mailbox": "vous@gmail.com",
+    "gmailConnected": true,
+    "verifiedAt": "2026-10-21T10:00:00.000Z",
+    "initialSync": { "imported": 12, "skipped": 0, "classified": 12 }
+  }
+}
+```
+
+Si la première synchronisation échoue, la connexion reste valide et
+`initialSync` contient `error`.
+
+### `POST /mail/sync`
+
+Synchronise les 50 derniers messages Gmail (`GMAIL_SYNC_LIMIT`) et classifie
+les nouveaux messages. Requiert le jeton CSRF. `409 GMAIL_NOT_CONNECTED` si
+aucune boîte Gmail n'est connectée ; `409 GMAIL_CREDENTIALS_UNREADABLE` si le
+secret stocké ne peut plus être déchiffré ; `422 GMAIL_SYNC_FAILED` en cas
+d'échec IMAP.
+
+```json
+{ "data": { "imported": 3, "skipped": 47, "classified": 3 } }
+```
 
 ## E-mails
 

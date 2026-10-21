@@ -3,10 +3,11 @@
 ## 1. Objet
 
 Application web de consultation et de réponse aux e-mails, avec synchronisation
-incrémentale, classification par IA, brouillons contrôlés par l'utilisateur et
-envoi fiable via n8n. Le dépôt contient le site, le backend, ses tests, les
-exports des workflows n8n, le `docker-compose.yml`, le `.env.example` et le
-script de données de démonstration.
+Gmail par utilisateur, classification par IA, brouillons contrôlés par
+l'utilisateur et envoi fiable. Chaque compte connecte sa propre boîte Gmail via
+un mot de passe d'application ; les données sont isolées par utilisateur. Le
+dépôt contient le site, le backend, ses tests, les exports des workflows n8n,
+le `docker-compose.yml`, le `.env.example` et le script de démonstration.
 
 ## 2. Installation depuis un dépôt vierge
 
@@ -28,7 +29,7 @@ docker compose exec backend node database/seed.js
 
 - Application : http://localhost:5173
 - Connexion : `demo@example.com` / `demo1234`
-- Inscription : page `/register` (les comptes partagent la boîte de démonstration)
+- Inscription : page `/register` (adresse Gmail + mot de passe d'application à 16 caractères)
 - API : http://localhost:4000/api/v1
 - Documentation interactive : http://localhost:4000/swagger-docs
 - Spécification OpenAPI 3 : http://localhost:4000/swagger-docs.json
@@ -66,7 +67,8 @@ Backend Express ────── SQL ──────► PostgreSQL 16
       │  ▲
       │  │ webhooks X-Webhook-Secret
       ▼  │
-      n8n ──► GreenMail local ou Gmail (IMAP/SMTP) / fournisseur IA
+      ├── IMAP/SMTP ──► Gmail du compte connecté
+      └── n8n ──► GreenMail local / fournisseur IA
 ```
 
 - Le navigateur ne contacte **jamais** n8n.
@@ -89,12 +91,16 @@ sync_state   sync_runs   audit_events
 
 Contraintes déterminantes :
 
-- `emails` : index unique `(normalize_email(mailbox), gmail_message_id)`.
-- `replies` : `idempotency_key` unique + journal `idempotency_records`
-  (clé + type d'opération + empreinte de requête).
-- `threads` : unique `(normalize_email(mailbox), gmail_thread_id)`.
-- `sync_state` : état de synchronisation par boîte (curseur historique conservé
-  pour compatibilité).
+- Toutes les tables métier portent `user_id` ; les requêtes sont filtrées par
+  utilisateur.
+- `emails` : index unique `(user_id, normalize_email(mailbox), gmail_message_id)`.
+- `replies` : `idempotency_key` unique par utilisateur + journal
+  `idempotency_records` (utilisateur + clé + type d'opération + empreinte).
+- `threads` : unique `(user_id, normalize_email(mailbox), gmail_thread_id)`.
+- `sync_state` : état de synchronisation par utilisateur (curseur historique
+  conservé pour compatibilité).
+- `users` : `mailbox_address`, mot de passe d'application Gmail chiffré
+  (AES-256-GCM) et date de vérification.
 
 Le schéma complet et les flux sont détaillés dans
 [`architecture.md`](architecture.md) ; les routes dans [`api.md`](api.md).
@@ -123,15 +129,18 @@ Le schéma complet et les flux sont détaillés dans
 5. Seul `FAILED` est réessayable ; `UNKNOWN` exige une réconciliation.
 6. Balayage périodique : un `SENDING` de plus de 15 minutes devient `UNKNOWN`.
 
-### Synchronisation IMAP
+### Synchronisation Gmail par utilisateur
 
-- Workflow 01 déclenché par IMAP sur `INBOX` avec la recherche `["UNSEEN"]`.
-- Les messages sont normalisés (`Message-ID`, `References`, corps texte) puis
-  envoyés par lots de 50 à `POST /webhooks/sync/import`.
-- Déduplication backend sur `(mailbox, gmail_message_id)` : une relecture IMAP
-  ne crée pas de doublon.
-- n8n suit le dernier UID (`trackLastMessageId`) ; `sync_runs` journalise chaque
-  exécution et `sync_state.cursor` reste exposé pour compatibilité.
+- À l'inscription ou via `POST /mail/connect`, le backend vérifie le mot de
+  passe d'application par IMAP + SMTP, le chiffre, puis importe les 25 derniers
+  messages.
+- `POST /mail/sync` lit les 50 derniers messages de `INBOX` via
+  `imap.gmail.com:993`, les normalise (`Message-ID`, `References`, corps texte)
+  et les importe de façon idempotente par utilisateur.
+- Déduplication sur `(user_id, gmail_message_id)` : une relecture ne crée pas de
+  doublon ; `sync_runs` et `sync_state` sont propres à l'utilisateur.
+- Le flux n8n historique (workflow 01, `POST /webhooks/sync/import`) reste
+  disponible pour la boîte GreenMail de démonstration.
 
 ## 5. Difficultés rencontrées et solutions
 
@@ -140,7 +149,7 @@ Le schéma complet et les flux sont détaillés dans
 | Double clic / requêtes concurrentes créant deux envois | Verrou consultatif + contrainte unique + empreinte de requête. |
 | Réutilisation d'une clé avec un autre contenu | `409 IDEMPOTENCY_CONFLICT` grâce à l'empreinte. |
 | Panne entre `SENDING` et le retour du workflow | État `UNKNOWN` + réconciliation, jamais de renvoi aveugle. |
-| Relecture IMAP des mêmes messages | Déduplication `(mailbox, gmail_message_id)` + suivi du dernier UID. |
+| Relecture IMAP des mêmes messages | Déduplication `(user_id, gmail_message_id)` + suivi du dernier UID. |
 | Sortie IA non JSON ou hors schéma | Validation Joi, une nouvelle tentative, puis `autre` + `needsReview`. |
 | Quota IA (HTTP 429) | Trois tentatives avec pause de 20 s + pause de 2 s entre e-mails. |
 | Webhook forgé | Secret partagé comparé à temps constant. |
@@ -158,8 +167,8 @@ backend Node 22.
 | Import de 30 e-mails (service `importBatch`) | **124 ms** (30 insérés, 0 ignoré) | Une transaction, 30 messages |
 | Ré-import des mêmes 30 e-mails | **95 ms** (0 inséré, 30 ignorés) | Déduplication confirmée : 30 lignes au total |
 | Sorties IA valides du premier coup | **30/30 = 100 %** | Provider `mock` déterministe, 7 ms |
-| Tests backend | **54 réussis / 54** | Vitest + Supertest, base isolée |
-| Tests frontend | **5 réussis / 5** | Vitest + Vue Test Utils |
+| Tests backend | **69 réussis / 69** | Vitest + Supertest, base isolée |
+| Tests frontend | **8 réussis / 8** | Vitest + Vue Test Utils |
 | Build frontend | **succès** | Vite, ~1,1 s |
 | Synchronisation IMAP locale | **succès** | GreenMail, workflow 01, e-mail importé |
 | Envoi SMTP local | **SENT** | GreenMail, workflow 03, `providerMessageId` retourné |
@@ -188,8 +197,13 @@ Couverture :
 - machine à états : transition illégale, réconciliation `SENDING → UNKNOWN`,
   synchronisation du statut de l'e-mail ;
 - authentification, CSRF, filtres et pagination de l'API ;
-- inscription : création + session immédiate, doublon insensible à la casse,
-  validation de l'e-mail et du mot de passe.
+- inscription : vérification Gmail simulée, création + session immédiate,
+  doublon insensible à la casse, validation de l'e-mail, du mot de passe et du
+  mot de passe d'application ;
+- isolation par utilisateur : listes, fils, résumé, réponses et clés
+  d'idempotence ;
+- connexion Gmail d'un compte existant et refus d'un compte non Gmail ;
+- chiffrement/déchiffrement AES-256-GCM des identifiants Gmail.
 
 ```bash
 cd apps/backend && npm test
@@ -208,13 +222,12 @@ cd apps/frontend && npm test
 
 ## 9. Limites et améliorations
 
-- **Inscription ouverte** : rate-limitée, sans vérification d'e-mail ; les
-  comptes partagent la même boîte. Pour la production, ajouter un code
-  d'invitation, une vérification d'e-mail et l'isolation des données par
-  utilisateur.
-- **Gmail réel / IA réelle non exécutés** dans cet environnement : le mode
-  local GreenMail est vérifié, mais prévoir un compte de test et une clé Groq
-  pour la recette finale.
+- **Inscription ouverte** : rate-limitée, sans code d'invitation ; elle exige
+  une adresse Gmail et un mot de passe d'application vérifié. Les données sont
+  isolées par utilisateur, avec une seule boîte par compte.
+- **Gmail réel / IA réelle non exécutés** dans cet environnement : le parcours
+  Gmail est couvert par des tests avec authentification simulée, mais la recette
+  finale exige un mot de passe d'application réel et une clé Groq.
 - **Frontend en mode développement** dans Compose ; servir le build statique
   derrière un reverse proxy en production.
 - **Signature HMAC du corps** des webhooks en plus du secret partagé.
@@ -223,6 +236,6 @@ cd apps/frontend && npm test
 - **Réponse automatique** encadrée pour une seule catégorie, avec garde-fou.
 - **Réconciliation semi-automatique** : proposer à l'opérateur de vérifier le
   fil de la boîte avant de résoudre un `UNKNOWN`.
-- **Multi-boîtes / multi-utilisateurs** : le modèle est prêt (`mailbox_address`)
-  mais l'interface ne gère qu'une boîte.
+- **Multi-boîtes** : un seul compte Gmail connecté par utilisateur ; le modèle
+  `mailbox_address` pourra être étendu à plusieurs boîtes.
 - **Génération de client** à partir de la spécification OpenAPI (`/swagger-docs.json`).
