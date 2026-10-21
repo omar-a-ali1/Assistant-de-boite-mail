@@ -5,46 +5,80 @@
   "nodes": [
     {
       "parameters": {
-        "pollTimes": {
-          "item": [
+        "rule": {
+          "interval": [
             {
-              "mode": "everyMinute"
+              "field": "minutes",
+              "minutesInterval": 10
             }
           ]
-        },
-        "simple": false,
-        "filters": {}
+        }
       },
       "id": "a1000000-0000-4000-8000-000000000001",
-      "name": "Nouveaux e-mails",
-      "type": "n8n-nodes-base.gmailTrigger",
+      "name": "Toutes les 10 minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [
         0,
         0
-      ],
-      "credentials": {
-        "gmailOAuth2": {
-          "id": "REPLACE_WITH_GMAIL_CREDENTIAL_ID",
-          "name": "Gmail account"
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.BACKEND_BASE_URL }}/api/v1/webhooks/sync/state?mailbox={{ $env.MAILBOX_ADDRESS }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Webhook-Secret",
+              "value": "={{ $env.N8N_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
         }
       },
-      "notes": "Sonde la boîte aux lettres. Associez vos identifiants OAuth2 Gmail."
+      "id": "a1000000-0000-4000-8000-000000000002",
+      "name": "Lire le curseur",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const cursor = $json.data && $json.data.cursor ? String($json.data.cursor) : null;\n\n// The cursor is stored in epoch SECONDS. Gmail's `after:` operator also uses\n// seconds. We re-read one second before the cursor to avoid losing messages\n// that share the boundary timestamp; the backend deduplicates by message id.\nlet q = 'newer_than:1d';\nif (cursor && /^\\d+$/.test(cursor)) {\n  const from = Math.max(0, Number(cursor) - 1);\n  q = 'after:' + from;\n}\n\nreturn [{ json: { q, cursorStart: cursor } }];"
+      },
+      "id": "a1000000-0000-4000-8000-000000000003",
+      "name": "Calculer la requête",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ]
     },
     {
       "parameters": {
         "resource": "message",
-        "operation": "get",
-        "messageId": "={{ $json.id }}",
+        "operation": "getAll",
+        "returnAll": true,
         "simple": false,
+        "filters": {
+          "q": "={{ $json.q }}"
+        },
         "options": {}
       },
-      "id": "a1000000-0000-4000-8000-000000000002",
-      "name": "Lire le message",
+      "id": "a1000000-0000-4000-8000-000000000004",
+      "name": "Lister tous les messages",
       "type": "n8n-nodes-base.gmail",
       "typeVersion": 2.1,
       "position": [
-        220,
+        660,
         0
       ],
       "credentials": {
@@ -52,18 +86,19 @@
           "id": "REPLACE_WITH_GMAIL_CREDENTIAL_ID",
           "name": "Gmail account"
         }
-      }
+      },
+      "notes": "Return All = n8n suit automatiquement les pageToken Gmail."
     },
     {
       "parameters": {
-        "jsCode": "const m = $json;\nconst headers = (m.payload && m.payload.headers) || [];\nconst get = (name) => (headers.find(h => String(h.name).toLowerCase() === name) || {}).value || '';\nconst parts = (m.payload && m.payload.parts) || [];\nconst decode = (data) => Buffer.from(data || '', 'base64').toString('utf-8');\n\nlet text = m.text || m.snippet || '';\nif (!text || text === m.snippet) {\n  const plain = parts.find(p => p.mimeType === 'text/plain' && p.body && p.body.data);\n  if (plain) text = decode(plain.body.data);\n}\n\nconst recipients = [get('to'), get('cc'), get('bcc')]\n  .filter(Boolean)\n  .join(',')\n  .split(',')\n  .map(s => s.trim())\n  .filter(Boolean);\n\nconst receivedAt = new Date(Number(m.internalDate || Date.now())).toISOString();\n\nreturn [{\n  json: {\n    mailbox: $env.MAILBOX_ADDRESS,\n    cursor: String(m.internalDate || ''),\n    executionId: $execution.id,\n    messages: [{\n      gmailMessageId: m.id,\n      gmailThreadId: m.threadId,\n      sender: get('from'),\n      recipients,\n      subject: get('subject'),\n      bodyText: String(text).slice(0, 400000),\n      receivedAt\n    }]\n  }\n}];"
+        "jsCode": "const items = $input.all();\n\nconst headersOf = (m) => (m.payload && m.payload.headers) || [];\nconst getHeader = (headers, name) => {\n  const found = headers.find(h => String(h.name).toLowerCase() === name);\n  return found ? found.value : '';\n};\nconst decode = (data) => Buffer.from(data || '', 'base64').toString('utf-8');\nconst bodyOf = (m) => {\n  const parts = (m.payload && m.payload.parts) || [];\n  if (m.text) return m.text;\n  const plain = parts.find(p => p.mimeType === 'text/plain' && p.body && p.body.data);\n  if (plain) return decode(plain.body.data);\n  return m.snippet || '';\n};\n\nlet cursorEnd = 0;\nconst messages = [];\n\nfor (const item of items) {\n  const m = item.json || {};\n  if (!m.id) continue;\n  const headers = headersOf(m);\n  const internalSeconds = Math.floor(Number(m.internalDate || Date.now()) / 1000);\n  if (internalSeconds > cursorEnd) cursorEnd = internalSeconds;\n\n  const recipients = [getHeader(headers, 'to'), getHeader(headers, 'cc'), getHeader(headers, 'bcc')]\n    .filter(Boolean)\n    .join(',')\n    .split(',')\n    .map(s => s.trim())\n    .filter(Boolean);\n\n  messages.push({\n    gmailMessageId: m.id,\n    gmailThreadId: m.threadId,\n    sender: getHeader(headers, 'from'),\n    recipients,\n    subject: getHeader(headers, 'subject'),\n    bodyText: String(bodyOf(m)).slice(0, 400000),\n    receivedAt: new Date(internalSeconds * 1000).toISOString()\n  });\n}\n\nif (messages.length === 0) {\n  return [];\n}\n\n// Chunk into batches the backend accepts (max 100).\nconst CHUNK = 50;\nconst chunks = [];\nfor (let i = 0; i < messages.length; i += CHUNK) {\n  const isLast = i + CHUNK >= messages.length;\n  chunks.push({\n    json: {\n      mailbox: $env.MAILBOX_ADDRESS,\n      // Advance the durable cursor only on the final chunk: if an earlier\n      // chunk fails, the workflow stops and the cursor stays put, so the\n      // next run retries the whole window (dedup absorbs the overlap).\n      cursor: isLast && cursorEnd ? String(cursorEnd) : null,\n      executionId: $execution.id,\n      messages: messages.slice(i, i + CHUNK),\n      _cursorEnd: cursorEnd ? String(cursorEnd) : null\n    }\n  });\n}\n\nreturn chunks;"
       },
-      "id": "a1000000-0000-4000-8000-000000000003",
-      "name": "Normaliser",
+      "id": "a1000000-0000-4000-8000-000000000005",
+      "name": "Normaliser et découper",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        440,
+        880,
         0
       ]
     },
@@ -82,22 +117,35 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify($json) }}",
+        "jsonBody": "={{ JSON.stringify({ mailbox: $json.mailbox, cursor: $json.cursor, executionId: $json.executionId, messages: $json.messages }) }}",
         "options": {
-          "timeout": 15000
+          "timeout": 30000
         }
       },
-      "id": "a1000000-0000-4000-8000-000000000004",
-      "name": "Importer (dédupliqué)",
+      "id": "a1000000-0000-4000-8000-000000000006",
+      "name": "Importer par lots (dédupliqué)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        660,
+        1100,
         0
       ],
       "retryOnFail": true,
       "maxTries": 3,
-      "waitBetweenTries": 2000
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "jsCode": "const responses = $input.all();\nlet imported = 0;\nlet skipped = 0;\nfor (const r of responses) {\n  const d = (r.json && r.json.data) || {};\n  imported += Number(d.imported || 0);\n  skipped += Number(d.skipped || 0);\n}\nconst first = $('Normaliser et découper').first().json;\nreturn [{ json: {\n  mailbox: $env.MAILBOX_ADDRESS,\n  executionId: $execution.id,\n  status: 'SUCCESS',\n  cursorStart: $('Calculer la requête').first().json.cursorStart,\n  cursorEnd: first._cursorEnd || null,\n  importedCount: imported,\n  updatedCount: 0,\n  skippedCount: skipped,\n  failedCount: 0\n} }];"
+      },
+      "id": "a1000000-0000-4000-8000-000000000007",
+      "name": "Agréger les résultats",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        0
+      ]
     },
     {
       "parameters": {
@@ -114,60 +162,96 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ mailbox: $env.MAILBOX_ADDRESS, executionId: $execution.id, status: 'SUCCESS', cursorEnd: $('Normaliser').item.json.cursor, importedCount: 1, updatedCount: 0, skippedCount: 0, failedCount: 0 }) }}",
+        "jsonBody": "={{ JSON.stringify($json) }}",
         "options": {
           "timeout": 15000
         }
       },
-      "id": "a1000000-0000-4000-8000-000000000005",
-      "name": "Rapporter le curseur",
+      "id": "a1000000-0000-4000-8000-000000000008",
+      "name": "Rapporter l'exécution",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        880,
+        1540,
         0
-      ]
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     }
   ],
   "connections": {
-    "Nouveaux e-mails": {
+    "Toutes les 10 minutes": {
       "main": [
         [
           {
-            "node": "Lire le message",
+            "node": "Lire le curseur",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Lire le message": {
+    "Lire le curseur": {
       "main": [
         [
           {
-            "node": "Normaliser",
+            "node": "Calculer la requête",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Normaliser": {
+    "Calculer la requête": {
       "main": [
         [
           {
-            "node": "Importer (dédupliqué)",
+            "node": "Lister tous les messages",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Importer (dédupliqué)": {
+    "Lister tous les messages": {
       "main": [
         [
           {
-            "node": "Rapporter le curseur",
+            "node": "Normaliser et découper",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normaliser et découper": {
+      "main": [
+        [
+          {
+            "node": "Importer par lots (dédupliqué)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Importer par lots (dédupliqué)": {
+      "main": [
+        [
+          {
+            "node": "Agréger les résultats",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agréger les résultats": {
+      "main": [
+        [
+          {
+            "node": "Rapporter l'exécution",
             "type": "main",
             "index": 0
           }
@@ -179,7 +263,7 @@
     "executionOrder": "v1"
   },
   "pinData": {},
-  "versionId": "usts-sync-gmail-v1",
+  "versionId": "usts-sync-gmail-v2",
   "meta": {
     "templateCredsSetupCompleted": false
   },

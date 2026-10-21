@@ -134,7 +134,7 @@
         }
       },
       "id": "a2000000-0000-4000-8000-000000000006",
-      "name": "Classer avec l'IA",
+      "name": "IA tentative 1",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
@@ -142,21 +142,106 @@
         0
       ],
       "retryOnFail": true,
-      "maxTries": 2,
-      "waitBetweenTries": 2000,
-      "onError": "continueErrorOutput"
+      "maxTries": 3,
+      "waitBetweenTries": 20000,
+      "onError": "continueErrorOutput",
+      "notes": "maxTries + 20s : reprise après HTTP 429."
     },
     {
       "parameters": {
-        "jsCode": "const categories = ['client', 'facture', 'rendez-vous', 'newsletter', 'spam probable', 'autre'];\nconst email = $('Préparer les e-mails').item.json;\nconst content = ($json.choices && $json.choices[0] && $json.choices[0].message && $json.choices[0].message.content) || '';\n\nlet p = null;\ntry { p = JSON.parse(content); } catch (e) { p = null; }\n\nif (!p || typeof p !== 'object') {\n  // Model/network failure: fall back to a reviewable classification instead\n  // of dropping the email silently.\n  return [{ json: {\n    valid: true,\n    emailId: email.emailId,\n    category: 'autre',\n    priority: 1,\n    summary: 'Classification IA indisponible. À vérifier manuellement.',\n    expectedAction: 'Reclasser manuellement cet e-mail.',\n    needsReview: true\n  } }];\n}\n\nconst validCategory = categories.includes(p.category);\nconst category = validCategory ? p.category : 'autre';\nconst priority = [1, 2, 3].includes(p.priority) ? p.priority : 1;\nconst summary = (typeof p.summary === 'string' && p.summary.trim())\n  ? p.summary.trim().slice(0, 500)\n  : 'Classification indisponible. À vérifier manuellement.';\nconst expectedAction = (typeof p.expectedAction === 'string' && p.expectedAction.trim())\n  ? p.expectedAction.trim().slice(0, 500)\n  : 'À vérifier manuellement.';\nconst needsReview = !validCategory || !p.summary || !p.expectedAction;\n\nreturn [{ json: { valid: true, emailId: email.emailId, category, priority, summary, expectedAction, needsReview } }];"
+        "jsCode": "const categories = ['client', 'facture', 'rendez-vous', 'newsletter', 'spam probable', 'autre'];\nconst input = $('IA tentative 1').item.json;\nconst content = ($json.choices && $json.choices[0] && $json.choices[0].message && $json.choices[0].message.content) || '';\n\nlet p = null;\ntry { p = JSON.parse(content); } catch (e) { p = null; }\n\nif (!p || typeof p !== 'object') {\n  // Keep the source email so the second attempt can reuse it.\n  return [{ json: {\n    retry: true,\n    emailId: input.emailId,\n    subject: input.subject || '',\n    sender: input.sender || '',\n    body: input.body || ''\n  } }];\n}\n\nconst validCategory = categories.includes(p.category);\nconst category = validCategory ? p.category : 'autre';\nconst priority = [1, 2, 3].includes(p.priority) ? p.priority : 1;\nconst summary = (typeof p.summary === 'string' && p.summary.trim())\n  ? p.summary.trim().slice(0, 500)\n  : 'Classification incomplète. À vérifier manuellement.';\nconst expectedAction = (typeof p.expectedAction === 'string' && p.expectedAction.trim())\n  ? p.expectedAction.trim().slice(0, 500)\n  : 'À vérifier manuellement.';\nconst needsReview = !validCategory || !p.summary || !p.expectedAction;\n\nreturn [{ json: { retry: false, emailId: input.emailId, category, priority, summary, expectedAction, needsReview } }];"
       },
       "id": "a2000000-0000-4000-8000-000000000007",
-      "name": "Valider la sortie IA",
+      "name": "Valider tentative 1",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
         1320,
         0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "needs-retry",
+              "leftValue": "={{ $json.retry }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a2000000-0000-4000-8000-000000000008",
+      "name": "Nouvelle tentative ?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1540,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.AI_BASE_URL }}/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.AI_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: $env.AI_MODEL, temperature: 0.2, response_format: { type: 'json_object' }, messages: [ { role: 'system', content: 'Tu classes des e-mails professionnels. Réponds UNIQUEMENT avec un objet JSON valide, sans texte autour. Champs: category (un parmi: client, facture, rendez-vous, newsletter, spam probable, autre), priority (entier 1=faible, 2=moyen, 3=élevé), summary (résumé en français, <=500 caractères), expectedAction (action attendue en français, <=500 caractères).' }, { role: 'user', content: 'Expéditeur: ' + ($json.sender || '') + '\\nSujet: ' + ($json.subject || '') + '\\n\\n' + String($json.body || '').slice(0, 8000) } ] }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "a2000000-0000-4000-8000-000000000009",
+      "name": "IA tentative 2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        200
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 20000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const categories = ['client', 'facture', 'rendez-vous', 'newsletter', 'spam probable', 'autre'];\nconst input = $('IA tentative 2').item.json;\nconst content = ($json.choices && $json.choices[0] && $json.choices[0].message && $json.choices[0].message.content) || '';\n\nlet p = null;\ntry { p = JSON.parse(content); } catch (e) { p = null; }\n\nif (!p || typeof p !== 'object') {\n  // Second failure: fail safe.\n  return [{ json: {\n    retry: false,\n    emailId: input.emailId,\n    category: 'autre',\n    priority: 1,\n    summary: 'Sortie IA invalide après nouvelle tentative. À vérifier manuellement.',\n    expectedAction: 'Reclasser manuellement cet e-mail.',\n    needsReview: true\n  } }];\n}\n\nconst validCategory = categories.includes(p.category);\nconst category = validCategory ? p.category : 'autre';\nconst priority = [1, 2, 3].includes(p.priority) ? p.priority : 1;\nconst summary = (typeof p.summary === 'string' && p.summary.trim())\n  ? p.summary.trim().slice(0, 500)\n  : 'Classification incomplète. À vérifier manuellement.';\nconst expectedAction = (typeof p.expectedAction === 'string' && p.expectedAction.trim())\n  ? p.expectedAction.trim().slice(0, 500)\n  : 'À vérifier manuellement.';\nconst needsReview = !validCategory || !p.summary || !p.expectedAction;\n\nreturn [{ json: { retry: false, emailId: input.emailId, category, priority, summary, expectedAction, needsReview } }];"
+      },
+      "id": "a2000000-0000-4000-8000-000000000010",
+      "name": "Valider tentative 2",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        200
       ]
     },
     {
@@ -179,12 +264,12 @@
           "timeout": 15000
         }
       },
-      "id": "a2000000-0000-4000-8000-000000000008",
+      "id": "a2000000-0000-4000-8000-000000000011",
       "name": "Enregistrer la classification",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1540,
+        2200,
         0
       ],
       "retryOnFail": true,
@@ -192,8 +277,23 @@
       "waitBetweenTries": 2000
     },
     {
+      "parameters": {
+        "amount": 2,
+        "unit": "seconds"
+      },
+      "id": "a2000000-0000-4000-8000-000000000012",
+      "name": "Pause anti-quota",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2420,
+        0
+      ],
+      "webhookId": "usts-classification-pause"
+    },
+    {
       "parameters": {},
-      "id": "a2000000-0000-4000-8000-000000000009",
+      "id": "a2000000-0000-4000-8000-000000000013",
       "name": "Terminé",
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
@@ -260,32 +360,79 @@
         ],
         [
           {
-            "node": "Classer avec l'IA",
+            "node": "IA tentative 1",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Classer avec l'IA": {
+    "IA tentative 1": {
       "main": [
         [
           {
-            "node": "Valider la sortie IA",
+            "node": "Valider tentative 1",
             "type": "main",
             "index": 0
           }
         ],
         [
           {
-            "node": "Valider la sortie IA",
+            "node": "Valider tentative 1",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Valider la sortie IA": {
+    "Valider tentative 1": {
+      "main": [
+        [
+          {
+            "node": "Nouvelle tentative ?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Nouvelle tentative ?": {
+      "main": [
+        [
+          {
+            "node": "IA tentative 2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Enregistrer la classification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IA tentative 2": {
+      "main": [
+        [
+          {
+            "node": "Valider tentative 2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Valider tentative 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valider tentative 2": {
       "main": [
         [
           {
@@ -297,6 +444,17 @@
       ]
     },
     "Enregistrer la classification": {
+      "main": [
+        [
+          {
+            "node": "Pause anti-quota",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pause anti-quota": {
       "main": [
         [
           {
@@ -312,7 +470,7 @@
     "executionOrder": "v1"
   },
   "pinData": {},
-  "versionId": "usts-classification-v1",
+  "versionId": "usts-classification-v3",
   "meta": {
     "templateCredsSetupCompleted": false
   },

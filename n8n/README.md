@@ -6,10 +6,28 @@ passent par des variables d'environnement ou par les identifiants n8n.
 
 | Fichier | Rôle | Déclencheur |
 | --- | --- | --- |
-| `workflows/01-sync-gmail.json` | Importe les nouveaux messages Gmail (dédupliqué côté backend) | Gmail Trigger (toutes les minutes) |
+| `workflows/01-sync-gmail.json` | Synchronisation incrémentale par curseur, pagination et lots | Schedule (toutes les 10 min) |
 | `workflows/02-classification.json` | Classe et résume les e-mails en attente via l'IA | Schedule (toutes les 2 min) |
 | `workflows/03-send-reply.json` | Envoie une réponse approuvée, puis rapporte le résultat | Webhook `POST /webhook/send-reply` |
 | `workflows/04-error-handler.json` | Journalise les échecs de workflow dans le backend | Error Trigger |
+
+## Comportements de fiabilité
+
+- **Curseur** : le workflow lit `GET /webhooks/sync/state`, interroge Gmail avec
+  `after:<curseur en secondes>` et ne fait avancer le curseur qu'après le
+  **dernier lot** importé. Une panne au milieu d'un lot laisse donc le curseur
+  intact ; la déduplication par `gmailMessageId` absorbe le recouvrement.
+- **Pagination** : le nœud Gmail `Get Many` est en *Return All*, n8n suit donc
+  automatiquement les `pageToken`.
+- **Lots** : les messages sont découpés par 50 (le backend accepte jusqu'à 100).
+- **Classification** : sortie validée contre une liste fermée ; en cas de JSON
+  invalide, **une nouvelle tentative** est faite, puis repli sur `autre` avec
+  `needsReview=true`. Pause de 2 s entre deux e-mails.
+- **Quota IA (HTTP 429)** : le nœud IA réessaie jusqu'à 3 fois avec 20 s
+  d'attente entre les tentatives.
+- **Envoi** : le navigateur n'appelle jamais n8n ; le backend seul déclenche le
+  webhook. Un résultat ambigu (timeout réseau) est rapporté `UNKNOWN`, jamais
+  `SENT`.
 
 ## Sens des appels
 
