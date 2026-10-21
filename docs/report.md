@@ -15,7 +15,7 @@ Prérequis : Docker et Docker Compose (ou Node.js 22+ et PostgreSQL 16).
 
 ```bash
 git clone <url-du-depot>
-cd Assistant-de-bo-te-mail
+cd  Assistant-de-boite-mail
 
 cp .env.example .env
 node -e "const c=require('crypto'),fs=require('fs');let s=fs.readFileSync('.env','utf8');

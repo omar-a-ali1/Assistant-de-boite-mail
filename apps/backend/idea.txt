@@ -1,3 +1,0 @@
-packages : expressJs / Joi / bcrypt / swagger docs / pg
-
-respect current structure and build features based init

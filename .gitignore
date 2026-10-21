@@ -28,4 +28,3 @@ coverage/
 tmp/
 *.local
 
-# Keep idea.txt and the exercise PDF tracked (they are project deliverables)
