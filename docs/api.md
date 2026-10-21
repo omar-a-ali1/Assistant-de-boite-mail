@@ -55,6 +55,28 @@ Vérifie la connexion PostgreSQL. `200` si prêt, `503` sinon.
 
 ## Authentification
 
+### `POST /auth/register`
+
+Crée un compte et ouvre immédiatement une session.
+
+```json
+{ "email": "vous@exemple.fr", "password": "mot-de-passe-solide", "displayName": "Votre Nom" }
+```
+
+`201`
+
+```json
+{
+  "data": {
+    "user": { "id": "…", "email": "vous@exemple.fr", "displayName": "Votre Nom" },
+    "csrfToken": "…"
+  }
+}
+```
+
+Erreurs : `400 VALIDATION_ERROR`, `409 EMAIL_ALREADY_EXISTS`,
+`429 RATE_LIMITED`.
+
 ### `POST /auth/login`
 
 ```json

@@ -38,11 +38,25 @@ async function authenticate(email, password) {
 }
 
 /**
- * Create a user (used by the bootstrap CLI, not by a public endpoint).
+ * Create a user. Used by the public registration endpoint and the bootstrap
+ * CLI. The unique index on the normalized email is the source of truth, so a
+ * concurrent duplicate is reported as a stable 409 instead of a 500.
  */
 async function createUser({ email, password, displayName }) {
   const passwordHash = await hashPassword(password);
-  return userModel.insert({ email, passwordHash, displayName: displayName || '' });
+  try {
+    const user = await userModel.insert({ email, passwordHash, displayName: displayName || '' });
+    return { id: user.id, email: user.email, displayName: user.display_name };
+  } catch (err) {
+    if (err && err.code === '23505') {
+      throw new AppError(
+        'EMAIL_ALREADY_EXISTS',
+        'An account already exists with this email.',
+        409
+      );
+    }
+    throw err;
+  }
 }
 
 module.exports = { authenticate, createUser, hashPassword, verifyPassword };

@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 /**
- * Bootstrap CLI: create a user account.
+ * Bootstrap/admin CLI: create a user account.
  *
- * The application never exposes a public registration endpoint. Create
- * the first account (and any additional account) with this command:
+ * Users can also register from the application (`POST /api/v1/auth/register`,
+ * UI at `/register`). This CLI remains useful for creating an admin/bootstrap
+ * account without going through the public, rate-limited endpoint:
  *
  *   npm run create-user -- --email admin@example.com --password '...' --name 'Admin'
  *

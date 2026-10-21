@@ -28,6 +28,7 @@ docker compose exec backend node database/seed.js
 
 - Application : http://localhost:5173
 - Connexion : `demo@example.com` / `demo1234`
+- Inscription : page `/register` (les comptes partagent la boîte de démonstration)
 - API : http://localhost:4000/api/v1
 - Documentation interactive : http://localhost:4000/swagger-docs
 - Spécification OpenAPI 3 : http://localhost:4000/swagger-docs.json
@@ -157,8 +158,8 @@ backend Node 22.
 | Import de 30 e-mails (service `importBatch`) | **124 ms** (30 insérés, 0 ignoré) | Une transaction, 30 messages |
 | Ré-import des mêmes 30 e-mails | **95 ms** (0 inséré, 30 ignorés) | Déduplication confirmée : 30 lignes au total |
 | Sorties IA valides du premier coup | **30/30 = 100 %** | Provider `mock` déterministe, 7 ms |
-| Tests backend | **51 réussis / 51** | Vitest + Supertest, base isolée |
-| Tests frontend | **3 réussis / 3** | Vitest + Vue Test Utils |
+| Tests backend | **54 réussis / 54** | Vitest + Supertest, base isolée |
+| Tests frontend | **5 réussis / 5** | Vitest + Vue Test Utils |
 | Build frontend | **succès** | Vite, ~1,1 s |
 | Synchronisation IMAP locale | **succès** | GreenMail, workflow 01, e-mail importé |
 | Envoi SMTP local | **SENT** | GreenMail, workflow 03, `providerMessageId` retourné |
@@ -186,7 +187,9 @@ Couverture :
 - sortie IA valide et sortie invalide (+ repli) ;
 - machine à états : transition illégale, réconciliation `SENDING → UNKNOWN`,
   synchronisation du statut de l'e-mail ;
-- authentification, CSRF, filtres et pagination de l'API.
+- authentification, CSRF, filtres et pagination de l'API ;
+- inscription : création + session immédiate, doublon insensible à la casse,
+  validation de l'e-mail et du mot de passe.
 
 ```bash
 cd apps/backend && npm test
@@ -205,6 +208,10 @@ cd apps/frontend && npm test
 
 ## 9. Limites et améliorations
 
+- **Inscription ouverte** : rate-limitée, sans vérification d'e-mail ; les
+  comptes partagent la même boîte. Pour la production, ajouter un code
+  d'invitation, une vérification d'e-mail et l'isolation des données par
+  utilisateur.
 - **Gmail réel / IA réelle non exécutés** dans cet environnement : le mode
   local GreenMail est vérifié, mais prévoir un compte de test et une clé Groq
   pour la recette finale.

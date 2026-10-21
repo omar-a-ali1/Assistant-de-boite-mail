@@ -31,9 +31,9 @@ function requireCsrf(req, res, next) {
   const safeMethods = ['GET', 'HEAD', 'OPTIONS'];
   if (safeMethods.includes(req.method)) return next();
 
-  // Login establishes the session and issues the token; it is not yet
-  // CSRF-protected (no authenticated session exists to abuse).
-  if (req.path === '/auth/login') return next();
+  // Login/registration establish the session and issue the token; they are
+  // not yet CSRF-protected (no authenticated session exists to abuse).
+  if (req.path === '/auth/login' || req.path === '/auth/register') return next();
 
   const expected = req.session && req.session.csrfToken;
   const provided = req.get('X-CSRF-Token') || '';

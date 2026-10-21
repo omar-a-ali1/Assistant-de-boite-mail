@@ -26,7 +26,7 @@ exposé au navigateur.
 
 ### Frontend
 
-- `views/` : `LoginView`, `TodayView`, `InboxView`, `ThreadView`.
+- `views/` : `LoginView`, `RegisterView`, `TodayView`, `InboxView`, `ThreadView`.
 - `components/ui/` : bibliothèque locale de composants (bouton, champ, carte,
   dialogue, toast…) sans dépendance à un design system lourd.
 - `stores/auth.js` : état de session en mémoire (jamais de jeton en
@@ -93,11 +93,14 @@ catégories, priorités et statuts variés.
 
 ## Flux principaux
 
-### Connexion
+### Inscription et connexion
 
-1. `POST /auth/login` vérifie l'e-mail et le hash bcrypt.
-2. La session est créée en base ; le cookie `HttpOnly` est posé.
-3. Un jeton CSRF est généré et renvoyé au client ; il sera exigé sur toutes
+1. `POST /auth/register` valide l'e-mail et le mot de passe (8 caractères
+   minimum), hache le mot de passe avec bcrypt et crée le compte. Un doublon
+   d'e-mail renvoie `409 EMAIL_ALREADY_EXISTS`.
+2. `POST /auth/login` vérifie l'e-mail et le hash bcrypt.
+3. La session est créée en base ; le cookie `HttpOnly` est posé.
+4. Un jeton CSRF est généré et renvoyé au client ; il sera exigé sur toutes
    les requêtes mutantes.
 
 ### Import (IMAP → backend)
@@ -192,7 +195,7 @@ depuis plus de 15 minutes en `UNKNOWN` (`STALE_SENDING`) : le message a peut-êt
 | --- | --- |
 | Vol de session | Cookie `HttpOnly`, `SameSite=Lax`, `Secure` en production |
 | CSRF | Jeton en session + en-tête `X-CSRF-Token`, comparaison à temps constant |
-| Force brute | Rate limiting sur `/auth/login` |
+| Force brute | Rate limiting sur `/auth/login` et `/auth/register` |
 | Webhook forgé | Secret partagé `X-Webhook-Secret` à temps constant |
 | Injection SQL | Requêtes paramétrées uniquement |
 | XSS | Rendu Vue échappé par défaut (pas de `v-html`) |

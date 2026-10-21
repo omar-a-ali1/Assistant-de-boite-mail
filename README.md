@@ -111,6 +111,9 @@ docker compose exec backend node database/seed.js
 
 **Compte de démonstration** : `demo@example.com` / `demo1234`
 
+Un lien **Créer un compte** est disponible sur la page de connexion
+(`/register`). Les comptes créés partagent la boîte de démonstration.
+
 > Si le port 5432 est déjà utilisé, mettez `POSTGRES_PORT=5433` dans `.env`.
 
 ### Développement avec rechargement à chaud (Fedora)
@@ -132,7 +135,8 @@ docker compose -f fedora.compose.yaml up --build
 Avec ce fichier, préfixez les commandes d'administration par
 `docker compose -f fedora.compose.yaml exec …`.
 
-Pour créer un autre utilisateur :
+Pour créer un autre utilisateur, utilisez la page `/register` ou, pour un
+compte d'administration, le script :
 
 ```bash
 docker compose exec backend node scripts/create-user.js \
@@ -180,7 +184,7 @@ npm test
 Couverture backend : import idempotent, concurrence et conflit d'idempotence,
 machine à états d'envoi, réconciliation `SENDING → UNKNOWN`, secret de webhook
 (absent/erroné), validation de sortie IA, authentification/CSRF, API.
-**51 tests backend + 3 tests frontend**.
+**54 tests backend + 5 tests frontend**.
 
 ## Workflows n8n
 
@@ -232,6 +236,8 @@ n'affiche jamais un envoi comme réussi (statut `NO_WORKFLOW` explicite).
 
 ## Limites connues
 
+- L'inscription est ouverte et limitée par IP ; les comptes partagent la même
+  boîte de démonstration (pas d'isolation multi-utilisateur).
 - La boîte locale GreenMail permet la synchronisation IMAP et l'envoi SMTP
   sans secret. Un vrai compte Gmail reste optionnel (`MAIL_MODE=gmail`) et
   nécessite un **mot de passe d'application**.

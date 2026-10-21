@@ -12,8 +12,8 @@ const auth = useAuthStore()
 const router = useRouter()
 const route = useRoute()
 
-const email = ref('')
-const password = ref('')
+const email = ref('demo@example.com')
+const password = ref('demo1234')
 const error = ref('')
 
 async function onSubmit() {
@@ -24,7 +24,10 @@ async function onSubmit() {
     const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/today'
     router.push(redirect)
   } catch (err) {
-    error.value = err.apiError?.message || 'Connexion impossible.'
+    error.value =
+      err.apiError?.code === 'UNAUTHORIZED'
+        ? 'E-mail ou mot de passe incorrect.'
+        : err.apiError?.message || 'Connexion impossible.'
   }
 }
 </script>
@@ -45,7 +48,7 @@ async function onSubmit() {
               v-model="email"
               type="email"
               autocomplete="username"
-              placeholder="vous@exemple.fr"
+              placeholder="demo@example.com"
               required
             />
           </div>
@@ -55,6 +58,7 @@ async function onSubmit() {
               id="password"
               v-model="password"
               type="password"
+              placeholder="demo1234"
               autocomplete="current-password"
               required
             />
@@ -72,6 +76,13 @@ async function onSubmit() {
             {{ auth.loading ? 'Connexion…' : 'Se connecter' }}
           </Button>
         </form>
+
+        <p class="mt-4 text-center text-sm text-[var(--color-muted-foreground)]">
+          Pas encore de compte ?
+          <RouterLink to="/register" class="font-medium text-[var(--color-primary)] hover:underline">
+            Créer un compte
+          </RouterLink>
+        </p>
       </CardContent>
     </Card>
   </div>

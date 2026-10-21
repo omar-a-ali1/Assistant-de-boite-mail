@@ -31,6 +31,7 @@ describe('API documentation', () => {
 
     expect(paths).toEqual(
       expect.arrayContaining([
+        '/auth/register',
         '/auth/login',
         '/auth/me',
         '/emails',

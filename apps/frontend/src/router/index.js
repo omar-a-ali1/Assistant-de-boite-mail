@@ -10,6 +10,12 @@ const routes = [
     meta: { public: true, title: 'Connexion' },
   },
   {
+    path: '/register',
+    name: 'register',
+    component: () => import('@/views/RegisterView.vue'),
+    meta: { public: true, title: 'Créer un compte' },
+  },
+  {
     path: '/today',
     name: 'today',
     component: () => import('@/views/TodayView.vue'),
@@ -62,7 +68,7 @@ router.beforeEach(async (to) => {
   if (!to.meta.public && !auth.isAuthenticated) {
     return { name: 'login', query: { redirect: to.fullPath } }
   }
-  if (to.name === 'login' && auth.isAuthenticated) {
+  if ((to.name === 'login' || to.name === 'register') && auth.isAuthenticated) {
     return { name: 'today' }
   }
   return true

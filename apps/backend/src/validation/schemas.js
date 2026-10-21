@@ -21,6 +21,12 @@ const login = Joi.object({
   password: Joi.string().min(1).max(200).required(),
 });
 
+const register = Joi.object({
+  email: Joi.string().trim().lowercase().email().max(254).required(),
+  password: Joi.string().min(8).max(200).required(),
+  displayName: Joi.string().trim().max(100).allow('').default(''),
+});
+
 // --- Email list query ---
 const emailListQuery = Joi.object({
   page: Joi.number().integer().min(1).default(1),
@@ -139,6 +145,7 @@ const aiClassificationOutput = Joi.object({
 module.exports = {
   uuid,
   login,
+  register,
   emailListQuery,
   summaryQuery,
   draftCreate,

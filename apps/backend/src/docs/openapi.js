@@ -216,6 +216,15 @@ const openapi = {
           password: { type: 'string', minLength: 1, maxLength: 200 },
         },
       },
+      RegisterRequest: {
+        type: 'object',
+        required: ['email', 'password'],
+        properties: {
+          email: { type: 'string', format: 'email', maxLength: 254 },
+          password: { type: 'string', minLength: 8, maxLength: 200 },
+          displayName: { type: 'string', maxLength: 100 },
+        },
+      },
       AuthResponse: {
         type: 'object',
         properties: {
@@ -522,6 +531,33 @@ const openapi = {
         responses: {
           200: { description: 'Base joignable.' },
           503: errorResponse('Base indisponible (NOT_READY).'),
+        },
+      },
+    },
+    '/auth/register': {
+      post: {
+        tags: ['Authentification'],
+        summary: 'Crée un compte et ouvre une session',
+        description:
+          'Inscription publique, limitée par IP. Le compte est connecté immédiatement ' +
+          '(cookie HttpOnly + jeton CSRF). Les comptes partagent la même boîte de démonstration.',
+        security: [],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': { schema: { $ref: '#/components/schemas/RegisterRequest' } },
+          },
+        },
+        responses: {
+          201: {
+            description: 'Compte créé ; session ouverte et jeton CSRF renvoyé.',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/AuthResponse' } },
+            },
+          },
+          400: { $ref: '#/components/responses/ValidationError' },
+          409: errorResponse('Un compte existe déjà avec cet e-mail (EMAIL_ALREADY_EXISTS).'),
+          429: { $ref: '#/components/responses/RateLimited' },
         },
       },
     },

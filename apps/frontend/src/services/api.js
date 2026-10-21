@@ -1,6 +1,8 @@
 import apiClient from './apiClient'
 
 export const authApi = {
+  register: (email, password, displayName) =>
+    apiClient.post('/auth/register', { email, password, displayName }),
   login: (email, password) => apiClient.post('/auth/login', { email, password }),
   logout: () => apiClient.post('/auth/logout'),
   me: () => apiClient.get('/auth/me'),
