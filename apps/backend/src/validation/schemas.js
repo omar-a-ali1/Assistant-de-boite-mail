@@ -27,7 +27,7 @@ const register = Joi.object({
   displayName: Joi.string().trim().max(100).allow('').default(''),
   gmailAppPassword: Joi.string()
     .trim()
-    .pattern(/^(?:\s*[A-Za-z0-9]\s*){8}$/)
+    .pattern(/^(?:\s*[A-Za-z0-9]){16}\s*$/)
     .required()
     .messages({
       'string.pattern.base':
@@ -38,7 +38,7 @@ const register = Joi.object({
 const mailConnect = Joi.object({
   gmailAppPassword: Joi.string()
     .trim()
-    .pattern(/^(?:\s*[A-Za-z0-9]\s*){16}$/)
+    .pattern(/^(?:\s*[A-Za-z0-9]){16}\s*$/)
     .required()
     .messages({
       'string.pattern.base':

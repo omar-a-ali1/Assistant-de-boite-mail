@@ -5,6 +5,7 @@
 import { describe, it, expect } from 'vitest';
 const mailService = require('../services/mail.service');
 const { encryptSecret, decryptSecret } = require('../utils/credentials');
+const { mailConnect, register } = require('../validation/schemas');
 
 describe('Gmail credential handling', () => {
   it('accepts only Gmail and Googlemail addresses', () => {
@@ -27,6 +28,17 @@ describe('Gmail credential handling', () => {
     await expect(
       mailService.verifyGmailCredentials('user@gmail.com', 'too-short')
     ).rejects.toMatchObject({ code: 'GMAIL_APP_PASSWORD_INVALID', status: 400 });
+  });
+
+  it('accepts 16 characters with or without display spaces in HTTP bodies', () => {
+    expect(mailConnect.validate({ gmailAppPassword: 'abcd efgh ijkl mnop' }).error).toBeUndefined();
+    expect(mailConnect.validate({ gmailAppPassword: 'abcdefghijklmnop' }).error).toBeUndefined();
+    expect(register.validate({ email: 'a@gmail.com', password: 'password-1234', gmailAppPassword: 'abcd efgh ijkl mnop' }).error).toBeUndefined();
+  });
+
+  it('rejects App Passwords with fewer or more than 16 characters', () => {
+    expect(mailConnect.validate({ gmailAppPassword: 'abcdefghijklmno' }).error).toBeTruthy();
+    expect(mailConnect.validate({ gmailAppPassword: 'abcdefghijklmnopq' }).error).toBeTruthy();
   });
 
   it('encrypts App Passwords with authenticated encryption', () => {

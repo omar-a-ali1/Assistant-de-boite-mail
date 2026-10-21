@@ -167,7 +167,7 @@ backend Node 22.
 | Import de 30 e-mails (service `importBatch`) | **124 ms** (30 insérés, 0 ignoré) | Une transaction, 30 messages |
 | Ré-import des mêmes 30 e-mails | **95 ms** (0 inséré, 30 ignorés) | Déduplication confirmée : 30 lignes au total |
 | Sorties IA valides du premier coup | **30/30 = 100 %** | Provider `mock` déterministe, 7 ms |
-| Tests backend | **69 réussis / 69** | Vitest + Supertest, base isolée |
+| Tests backend | **71 réussis / 71** | Vitest + Supertest, base isolée |
 | Tests frontend | **8 réussis / 8** | Vitest + Vue Test Utils |
 | Build frontend | **succès** | Vite, ~1,1 s |
 | Synchronisation IMAP locale | **succès** | GreenMail, workflow 01, e-mail importé |

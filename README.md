@@ -192,7 +192,7 @@ npm test
 Couverture backend : import idempotent, concurrence et conflit d'idempotence,
 machine à états d'envoi, réconciliation `SENDING → UNKNOWN`, secret de webhook
 (absent/erroné), validation de sortie IA, authentification/CSRF, API.
-**69 tests backend + 8 tests frontend**.
+**71 tests backend + 8 tests frontend**.
 
 ## Workflows n8n
 
