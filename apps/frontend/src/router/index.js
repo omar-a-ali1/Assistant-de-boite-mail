@@ -16,6 +16,12 @@ const routes = [
     meta: { public: true, title: 'Créer un compte' },
   },
   {
+    path: '/connect-gmail',
+    name: 'connect-gmail',
+    component: () => import('@/views/ConnectGmailView.vue'),
+    meta: { title: 'Connecter Gmail' },
+  },
+  {
     path: '/today',
     name: 'today',
     component: () => import('@/views/TodayView.vue'),

@@ -1,11 +1,17 @@
 import apiClient from './apiClient'
 
 export const authApi = {
-  register: (email, password, displayName) =>
-    apiClient.post('/auth/register', { email, password, displayName }),
+  register: ({ email, password, displayName, gmailAppPassword }) =>
+    apiClient.post('/auth/register', { email, password, displayName, gmailAppPassword }),
   login: (email, password) => apiClient.post('/auth/login', { email, password }),
   logout: () => apiClient.post('/auth/logout'),
   me: () => apiClient.get('/auth/me'),
+}
+
+export const mailApi = {
+  status: () => apiClient.get('/mail/status'),
+  connect: (gmailAppPassword) => apiClient.post('/mail/connect', { gmailAppPassword }),
+  sync: () => apiClient.post('/mail/sync'),
 }
 
 export const emailApi = {

@@ -19,5 +19,6 @@ export function dismissToast(id) {
 export const toast = {
   info: (m) => pushToast(m, { type: 'info' }),
   success: (m) => pushToast(m, { type: 'success' }),
+  warning: (m) => pushToast(m, { type: 'warning', timeout: 7000 }),
   error: (m) => pushToast(m, { type: 'error', timeout: 6000 }),
 }

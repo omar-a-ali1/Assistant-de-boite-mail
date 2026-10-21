@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
+import MailSyncButton from './MailSyncButton.vue'
 
 const route = useRoute()
 const title = computed(() => route.meta.title || 'Assistant e-mail')
@@ -12,6 +13,7 @@ const title = computed(() => route.meta.title || 'Assistant e-mail')
   >
     <h1 class="truncate text-base font-semibold">{{ title }}</h1>
     <div class="flex items-center gap-3">
+      <MailSyncButton />
       <slot name="actions" />
     </div>
   </header>
