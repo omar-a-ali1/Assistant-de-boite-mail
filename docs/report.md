@@ -29,6 +29,8 @@ docker compose exec backend node database/seed.js
 - Application : http://localhost:5173
 - Connexion : `demo@example.com` / `demo1234`
 - API : http://localhost:4000/api/v1
+- Documentation interactive : http://localhost:4000/api/docs
+- Spécification OpenAPI 3 : http://localhost:4000/api/docs.json
 - n8n : http://localhost:5678
 
 Les migrations sont appliquées automatiquement au démarrage du backend
@@ -42,6 +44,16 @@ docker compose exec backend node scripts/create-user.js \
 ```
 
 Sans Docker, voir la section « Développement local » du `README.md`.
+
+### Développement Fedora avec rechargement à chaud
+
+Le fichier `fedora.compose.yaml` monte les sources avec l'option SELinux `:z`,
+masque les `node_modules` de l'hôte par des volumes nommés et lance le backend
+avec `node --watch` et le frontend avec Vite (HMR) :
+
+```bash
+docker compose -f fedora.compose.yaml up --build
+```
 
 ## 3. Architecture
 
@@ -141,7 +153,7 @@ backend Node 22.
 | Import de 30 e-mails (service `importBatch`) | **124 ms** (30 insérés, 0 ignoré) | Une transaction, 30 messages |
 | Ré-import des mêmes 30 e-mails | **95 ms** (0 inséré, 30 ignorés) | Déduplication confirmée : 30 lignes au total |
 | Sorties IA valides du premier coup | **30/30 = 100 %** | Provider `mock` déterministe, 7 ms |
-| Tests backend | **48 réussis / 48** | Vitest + Supertest, base isolée |
+| Tests backend | **51 réussis / 51** | Vitest + Supertest, base isolée |
 | Tests frontend | **3 réussis / 3** | Vitest + Vue Test Utils |
 | Build frontend | **succès** | Vite, ~1,1 s |
 
@@ -199,4 +211,4 @@ cd apps/frontend && npm test
   fil Gmail avant de résoudre un `UNKNOWN`.
 - **Multi-boîtes / multi-utilisateurs** : le modèle est prêt (`mailbox_address`)
   mais l'interface ne gère qu'une boîte.
-- **Documentation OpenAPI** générée automatiquement à partir des schémas Joi.
+- **Génération de client** à partir de la spécification OpenAPI (`/api/docs.json`).

@@ -2,6 +2,19 @@
 
 Base URL : `http://localhost:4000/api/v1`
 
+## Documentation interactive (Swagger)
+
+La spécification OpenAPI 3 est servie par le backend :
+
+- Swagger UI : http://localhost:4000/api/docs
+- JSON brut : http://localhost:4000/api/docs.json
+
+Elle couvre l'authentification, les e-mails, les brouillons, les réponses et
+les sept webhooks n8n, avec les schémas de requête/réponse et les exigences de
+sécurité (cookie de session, CSRF, `Idempotency-Key`, `X-Webhook-Secret`).
+Les routes sont découpées par ressource dans
+`apps/backend/src/routes/{auth,email,draft,reply}.route.js`.
+
 ## Conventions
 
 - Succès : `{ "data": ... }` (les listes ajoutent un objet `meta`).

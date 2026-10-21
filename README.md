@@ -104,11 +104,32 @@ docker compose exec backend node database/seed.js
 
 - Application : http://localhost:5173
 - API : http://localhost:4000/api/v1
+- Documentation interactive (Swagger UI) : http://localhost:4000/api/docs
+- Spécification brute (OpenAPI 3) : http://localhost:4000/api/docs.json
 - n8n : http://localhost:5678
 
 **Compte de démonstration** : `demo@example.com` / `demo1234`
 
 > Si le port 5432 est déjà utilisé, mettez `POSTGRES_PORT=5433` dans `.env`.
+
+### Développement avec rechargement à chaud (Fedora)
+
+`fedora.compose.yaml` remplace le build de production par des montages de
+sources avec rechargement automatique. Les montages utilisent l'option `:z`
+pour que SELinux puisse les étiqueter, et des volumes nommés masquent les
+`node_modules` installés sur l'hôte.
+
+```bash
+docker compose -f fedora.compose.yaml up --build
+```
+
+- Backend : `node --watch` (migrations au démarrage, redémarrage à chaque
+  modification de `apps/backend`).
+- Frontend : serveur Vite avec HMR sur `apps/frontend`.
+- Les données PostgreSQL et n8n sont conservées dans des volumes dédiés.
+
+Avec ce fichier, préfixez les commandes d'administration par
+`docker compose -f fedora.compose.yaml exec …`.
 
 Pour créer un autre utilisateur :
 
@@ -158,7 +179,7 @@ npm test
 Couverture backend : import idempotent, concurrence et conflit d'idempotence,
 machine à états d'envoi, réconciliation `SENDING → UNKNOWN`, secret de webhook
 (absent/erroné), validation de sortie IA, authentification/CSRF, API.
-**48 tests backend + 3 tests frontend**.
+**51 tests backend + 3 tests frontend**.
 
 ## Workflows n8n
 
@@ -200,6 +221,7 @@ reste entièrement utilisable et n'affiche jamais un envoi comme réussi
 │   ├── workflows             # exports JSON
 │   └── README.md
 ├── docker-compose.yaml
+├── fedora.compose.yaml       # dev Fedora : bind mounts + hot reload
 └── .env.example
 ```
 

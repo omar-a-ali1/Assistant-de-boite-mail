@@ -40,9 +40,10 @@ exposé au navigateur.
 
 ```
 src/
-├── app.js                 # middlewares + montage des routeurs
+├── app.js                 # middlewares + montage des routeurs + Swagger
 ├── config/                # env (Joi), db (pool, transactions), session, constantes
-├── routes/                # API privée + webhooks n8n
+├── docs/openapi.js        # spécification OpenAPI 3 (source unique)
+├── routes/                # index + auth/email/draft/reply.route + webhooks n8n
 ├── controllers/           # adaptation HTTP
 ├── services/              # règles métier (auth, import, reply, ai, n8n, summary)
 ├── models/                # SQL paramétré
@@ -50,6 +51,12 @@ src/
 ├── validation/            # schémas Joi (HTTP + IA)
 └── tests/                 # Vitest + Supertest
 ```
+
+Chaque ressource possède son routeur (`auth.route.js`, `email.route.js`,
+`draft.route.js`, `reply.route.js`) monté par `routes/index.js`. Les webhooks
+n8n restent isolés dans `routes/webhooks.js`, montés avant le contrôle CSRF
+puisqu'ils s'authentifient par `X-Webhook-Secret`. La spécification OpenAPI est
+exposée publiquement sur `/api/docs` (Swagger UI) et `/api/docs.json`.
 
 Séparation stricte : les contrôleurs ne contiennent pas de SQL, les modèles ne
 contiennent pas de règles métier, les services orchestrent les transactions.

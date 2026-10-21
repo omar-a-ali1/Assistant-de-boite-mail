@@ -8,6 +8,8 @@ const express = require('express');
 const helmet = require('helmet');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
+const swaggerUi = require('swagger-ui-express');
+const openapi = require('./docs/openapi');
 const config = require('./config/env');
 const { query } = require('./config/db');
 const { sessionOptions } = require('./config/session');
@@ -35,6 +37,24 @@ function createApp() {
   app.use(cookieParser());
   app.use(require('express-session')(sessionOptions()));
   app.use(requestContext);
+
+  // API documentation. Public and mounted before CSRF so it can be opened
+  // without a session. Swagger UI relies on inline assets, so the global
+  // Content-Security-Policy is lifted for these two paths only.
+  const allowInlineDocs = (req, res, next) => {
+    res.removeHeader('Content-Security-Policy');
+    next();
+  };
+  app.get('/api/docs.json', allowInlineDocs, (req, res) => res.json(openapi));
+  app.use(
+    '/api/docs',
+    allowInlineDocs,
+    swaggerUi.serve,
+    swaggerUi.setup(openapi, {
+      customSiteTitle: 'Assistant e-mail — API',
+      swaggerOptions: { persistAuthorization: true, displayRequestDuration: true },
+    })
+  );
 
   app.get('/api/v1/health', (req, res) => {
     res.json({ data: { status: 'ok', time: new Date().toISOString() } });

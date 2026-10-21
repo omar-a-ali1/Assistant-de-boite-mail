@@ -1,0 +1,144 @@
+# Fedora development stack: source code is bind-mounted (SELinux relabel via :z)
+# and both apps run in watch mode. Use this file instead of docker-compose.yaml
+# when working locally on Fedora:
+#
+#   docker compose -f fedora.compose.yaml up --build
+#
+# Differences vs. docker-compose.yaml (production-like):
+#   - bind mounts + `:z` so SELinux can label the host files
+#   - named volumes shadow node_modules (host installs never leak in)
+#   - backend runs `node --watch`, frontend runs the Vite dev server
+#   - no production restart policy; `init: true` for clean signal handling
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    init: true
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-usts}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-usts_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-usts_email}
+    volumes:
+      - fedora_pgdata:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro,z
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-usts} -d $${POSTGRES_DB:-usts_email}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./apps/backend
+      dockerfile: Dockerfile
+    init: true
+    tty: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+    entrypoint:
+      - sh
+      - -c
+      - node database/migrate.js && npm run dev
+    environment:
+      NODE_ENV: development
+      LOG_LEVEL: ${LOG_LEVEL:-debug}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-usts}:${POSTGRES_PASSWORD:-usts_dev_password}@postgres:5432/${POSTGRES_DB:-usts_email}
+      BACKEND_PORT: 4000
+      FRONTEND_PORT: 5173
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:5173}
+      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET is required}
+      N8N_BASE_URL: http://n8n:5678
+      N8N_WEBHOOK_SECRET: ${N8N_WEBHOOK_SECRET:?N8N_WEBHOOK_SECRET is required}
+      N8N_SYNC_WEBHOOK_URL: ${N8N_SYNC_WEBHOOK_URL:-}
+      N8N_CLASSIFICATION_WEBHOOK_URL: ${N8N_CLASSIFICATION_WEBHOOK_URL:-}
+      N8N_SEND_REPLY_WEBHOOK_URL: ${N8N_SEND_REPLY_WEBHOOK_URL:-}
+      AI_PROVIDER: ${AI_PROVIDER:-mock}
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_MODEL: ${AI_MODEL:-llama-3.3-70b-versatile}
+      AI_BASE_URL: ${AI_BASE_URL:-https://api.groq.com/openai/v1}
+      MAILBOX_ADDRESS: ${MAILBOX_ADDRESS:-demo@example.com}
+    volumes:
+      # `:z` is required on Fedora with SELinux enforcing.
+      - ./apps/backend:/app:z
+      - fedora_backend_node_modules:/app/node_modules
+    ports:
+      - "${BACKEND_PORT:-4000}:4000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:4000/api/v1/health/ready').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  frontend:
+    build:
+      context: ./apps/frontend
+      dockerfile: Dockerfile
+    init: true
+    tty: true
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      VITE_API_PROXY_TARGET: http://backend:4000
+    volumes:
+      - ./apps/frontend:/app:z
+      - fedora_frontend_node_modules:/app/node_modules
+    ports:
+      - "${FRONTEND_PORT:-5173}:5173"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:5173/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  n8n:
+    image: n8nio/n8n:2.43.7
+    init: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_DATABASE: ${N8N_DB:-n8n}
+      DB_POSTGRESDB_USER: ${POSTGRES_USER:-usts}
+      DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD:-usts_dev_password}
+      N8N_HOST: localhost
+      N8N_PORT: 5678
+      N8N_PROTOCOL: http
+      WEBHOOK_URL: http://localhost:5678/
+      N8N_SECURE_COOKIE: "false"
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:-}
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      GENERIC_TIMEZONE: Europe/Paris
+      GMAIL_CLIENT_ID: ${GMAIL_CLIENT_ID:-}
+      GMAIL_CLIENT_SECRET: ${GMAIL_CLIENT_SECRET:-}
+      GMAIL_REDIRECT_URI: ${GMAIL_REDIRECT_URI:-}
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_MODEL: ${AI_MODEL:-llama-3.3-70b-versatile}
+      AI_BASE_URL: ${AI_BASE_URL:-https://api.groq.com/openai/v1}
+      BACKEND_BASE_URL: http://backend:4000
+      MAILBOX_ADDRESS: ${MAILBOX_ADDRESS:-demo@example.com}
+      N8N_WEBHOOK_SECRET: ${N8N_WEBHOOK_SECRET:?N8N_WEBHOOK_SECRET is required}
+    volumes:
+      - fedora_n8n_data:/home/node/.n8n
+    ports:
+      - "${N8N_PORT:-5678}:5678"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:5678/healthz || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+volumes:
+  fedora_pgdata:
+  fedora_backend_node_modules:
+  fedora_frontend_node_modules:
+  fedora_n8n_data:
