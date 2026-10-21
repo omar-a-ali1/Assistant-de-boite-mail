@@ -142,14 +142,19 @@ async function submitReply({ emailId, idempotencyKey, body, draftId, userId }) {
 
   // Dispatch only for a freshly created operation. Never resubmit blindly.
   if (!reused) {
-    await dispatch(reply, { gmailThreadId: thread.gmail_thread_id, gmailMessageId: email.gmail_message_id });
+    await dispatch(reply, {
+      gmailThreadId: thread.gmail_thread_id,
+      gmailMessageId: email.gmail_message_id,
+      to: email.sender,
+      subject: thread.subject,
+    });
   }
 
   return { reply: await replyModel.findById(reply.id), reused };
 }
 
 /** Move PENDING -> SENDING and trigger the n8n send workflow. */
-async function dispatch(reply, { gmailThreadId, gmailMessageId }) {
+async function dispatch(reply, { gmailThreadId, gmailMessageId, to, subject }) {
   // Only PENDING replies are eligible. Prevents duplicate dispatch.
   const current = await replyModel.findById(reply.id);
   if (!current || current.status !== 'PENDING') {
@@ -163,6 +168,8 @@ async function dispatch(reply, { gmailThreadId, gmailMessageId }) {
     replyId: reply.id,
     idempotencyKey: reply.idempotency_key,
     body: reply.body,
+    to,
+    subject,
     gmailThreadId,
     gmailMessageId,
     originalEmailId: reply.original_email_id,
@@ -292,6 +299,8 @@ async function retry(replyId) {
   await dispatch(reply, {
     gmailThreadId: thread.gmail_thread_id,
     gmailMessageId: email.gmail_message_id,
+    to: email.sender,
+    subject: thread.subject,
   });
   return replyModel.findById(replyId);
 }

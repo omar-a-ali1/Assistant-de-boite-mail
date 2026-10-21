@@ -1,0 +1,96 @@
+{
+  "id": "usts-error-handler",
+  "name": "04 - Gestion des erreurs",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "a4000000-0000-4000-8000-000000000001",
+      "name": "Erreur de workflow",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const payload = $json || {};\nconst err = payload.error || {};\nconst wf = payload.workflow || {};\nconst exec = payload.execution || {};\n\nreturn [{ json: {\n  workflowName: String(wf.name || 'unknown-workflow').slice(0, 255),\n  executionId: exec.id ? String(exec.id).slice(0, 255) : String($execution.id || '').slice(0, 255) || null,\n  errorCode: String(err.name || err.code || 'WORKFLOW_ERROR').slice(0, 100),\n  errorMessage: String(err.message || err.description || 'Workflow failure').slice(0, 500),\n  occurredAt: new Date().toISOString()\n} }];"
+      },
+      "id": "a4000000-0000-4000-8000-000000000002",
+      "name": "Assainir l'erreur",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.BACKEND_BASE_URL }}/api/v1/webhooks/workflow/failure",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Webhook-Secret",
+              "value": "={{ $env.N8N_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "a4000000-0000-4000-8000-000000000003",
+      "name": "Enregistrer l'échec",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    }
+  ],
+  "connections": {
+    "Erreur de workflow": {
+      "main": [
+        [
+          {
+            "node": "Assainir l'erreur",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assainir l'erreur": {
+      "main": [
+        [
+          {
+            "node": "Enregistrer l'échec",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "versionId": "usts-error-handler-v1",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}

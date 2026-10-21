@@ -1,0 +1,390 @@
+{
+  "id": "usts-send-reply",
+  "name": "03 - Envoi de réponse",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "send-reply",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "a3000000-0000-4000-8000-000000000001",
+      "name": "Webhook envoi",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "usts-send-reply"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "secret-ok",
+              "leftValue": "={{ $json.headers['x-webhook-secret'] || '' }}",
+              "rightValue": "={{ $env.N8N_WEBHOOK_SECRET }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a3000000-0000-4000-8000-000000000002",
+      "name": "Secret valide ?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ error: { code: 'UNAUTHORIZED', message: 'Invalid webhook secret.' } }) }}",
+        "options": {
+          "responseCode": 401
+        }
+      },
+      "id": "a3000000-0000-4000-8000-000000000003",
+      "name": "401",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        440,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "has-reply-id",
+              "leftValue": "={{ $json.body.replyId || '' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            },
+            {
+              "id": "has-body",
+              "leftValue": "={{ $json.body.body || '' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            },
+            {
+              "id": "has-recipient",
+              "leftValue": "={{ $json.body.to || '' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a3000000-0000-4000-8000-000000000004",
+      "name": "Requête complète ?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ error: { code: 'INVALID_PAYLOAD', message: 'replyId, body and to are required.' } }) }}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "a3000000-0000-4000-8000-000000000005",
+      "name": "400",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "={{ $json.body.to }}",
+        "subject": "={{ 'Re: ' + ($json.body.subject || 'votre message') }}",
+        "message": "={{ $json.body.body }}",
+        "options": {
+          "threadId": "={{ $json.body.gmailThreadId }}"
+        }
+      },
+      "id": "a3000000-0000-4000-8000-000000000006",
+      "name": "Envoyer via Gmail",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        660,
+        0
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_WITH_GMAIL_CREDENTIAL_ID",
+          "name": "Gmail account"
+        }
+      },
+      "onError": "continueErrorOutput",
+      "retryOnFail": false
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.BACKEND_BASE_URL }}/api/v1/webhooks/reply/outcome",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Webhook-Secret",
+              "value": "={{ $env.N8N_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ replyId: $('Webhook envoi').item.json.body.replyId, status: 'SENT', providerMessageId: ($json.id || null) }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "a3000000-0000-4000-8000-000000000007",
+      "name": "Rapporter SENT",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 4,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $('Webhook envoi').item.json.body || {};\nconst err = $json.error || {};\nconst msg = String(err.message || err.description || 'Erreur inconnue lors de l’envoi Gmail').slice(0, 500);\n\n// A transport failure is ambiguous: the message may have been delivered.\n// Report UNKNOWN so the backend blocks a blind resend until reconciliation.\nconst ambiguous = /timeout|ETIMEDOUT|ECONNRESET|socket hang up|network|EAI_AGAIN|ENOTFOUND/i.test(msg);\n\nreturn [{ json: {\n  replyId: body.replyId,\n  status: ambiguous ? 'UNKNOWN' : 'FAILED',\n  errorCode: ambiguous ? 'NETWORK' : 'GMAIL_SEND_FAILED',\n  errorMessage: msg\n} }];"
+      },
+      "id": "a3000000-0000-4000-8000-000000000008",
+      "name": "Classer l'échec",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.BACKEND_BASE_URL }}/api/v1/webhooks/reply/outcome",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Webhook-Secret",
+              "value": "={{ $env.N8N_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ replyId: $json.replyId, status: $json.status, errorCode: $json.errorCode, errorMessage: $json.errorMessage }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "a3000000-0000-4000-8000-000000000009",
+      "name": "Rapporter l'échec",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        200
+      ],
+      "retryOnFail": true,
+      "maxTries": 4,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ data: { accepted: true } }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "a3000000-0000-4000-8000-000000000010",
+      "name": "200 envoyé",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1320,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ data: { accepted: true, outcomeRecorded: true } }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "a3000000-0000-4000-8000-000000000011",
+      "name": "200 échec enregistré",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1320,
+        200
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook envoi": {
+      "main": [
+        [
+          {
+            "node": "Secret valide ?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Secret valide ?": {
+      "main": [
+        [
+          {
+            "node": "Requête complète ?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "401",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Requête complète ?": {
+      "main": [
+        [
+          {
+            "node": "Envoyer via Gmail",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "400",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Envoyer via Gmail": {
+      "main": [
+        [
+          {
+            "node": "Rapporter SENT",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Classer l'échec",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rapporter SENT": {
+      "main": [
+        [
+          {
+            "node": "200 envoyé",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classer l'échec": {
+      "main": [
+        [
+          {
+            "node": "Rapporter l'échec",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rapporter l'échec": {
+      "main": [
+        [
+          {
+            "node": "200 échec enregistré",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "versionId": "usts-send-reply-v1",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}

@@ -97,7 +97,9 @@ services:
       GMAIL_REDIRECT_URI: ${GMAIL_REDIRECT_URI:-}
       AI_API_KEY: ${AI_API_KEY:-}
       AI_MODEL: ${AI_MODEL:-llama-3.3-70b-versatile}
+      AI_BASE_URL: ${AI_BASE_URL:-https://api.groq.com/openai/v1}
       BACKEND_BASE_URL: http://backend:4000
+      MAILBOX_ADDRESS: ${MAILBOX_ADDRESS:-demo@example.com}
       N8N_WEBHOOK_SECRET: ${N8N_WEBHOOK_SECRET:?N8N_WEBHOOK_SECRET is required}
     volumes:
       - n8n_data:/home/node/.n8n

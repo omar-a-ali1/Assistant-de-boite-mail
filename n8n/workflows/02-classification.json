@@ -1,0 +1,320 @@
+{
+  "id": "usts-classification",
+  "name": "02 - Classification IA",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 2
+            }
+          ]
+        }
+      },
+      "id": "a2000000-0000-4000-8000-000000000001",
+      "name": "Toutes les 2 minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.BACKEND_BASE_URL }}/api/v1/webhooks/classification/pending?limit=20",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Webhook-Secret",
+              "value": "={{ $env.N8N_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "a2000000-0000-4000-8000-000000000002",
+      "name": "E-mails à classer",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "has-pending",
+              "leftValue": "={{ ($json.data || []).length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a2000000-0000-4000-8000-000000000003",
+      "name": "Des e-mails en attente ?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = ($json.data || []);\nreturn data.map(e => ({\n  json: {\n    emailId: e.emailId,\n    subject: e.subject || '',\n    sender: e.sender || '',\n    body: e.body || ''\n  }\n}));"
+      },
+      "id": "a2000000-0000-4000-8000-000000000004",
+      "name": "Préparer les e-mails",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "a2000000-0000-4000-8000-000000000005",
+      "name": "Un par un",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        880,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.AI_BASE_URL }}/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.AI_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: $env.AI_MODEL, temperature: 0.2, response_format: { type: 'json_object' }, messages: [ { role: 'system', content: 'Tu classes des e-mails professionnels. Réponds UNIQUEMENT avec un objet JSON valide, sans texte autour. Champs: category (un parmi: client, facture, rendez-vous, newsletter, spam probable, autre), priority (entier 1=faible, 2=moyen, 3=élevé), summary (résumé en français, <=500 caractères), expectedAction (action attendue en français, <=500 caractères).' }, { role: 'user', content: 'Expéditeur: ' + ($json.sender || '') + '\\nSujet: ' + ($json.subject || '') + '\\n\\n' + String($json.body || '').slice(0, 8000) } ] }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "a2000000-0000-4000-8000-000000000006",
+      "name": "Classer avec l'IA",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const categories = ['client', 'facture', 'rendez-vous', 'newsletter', 'spam probable', 'autre'];\nconst email = $('Préparer les e-mails').item.json;\nconst content = ($json.choices && $json.choices[0] && $json.choices[0].message && $json.choices[0].message.content) || '';\n\nlet p = null;\ntry { p = JSON.parse(content); } catch (e) { p = null; }\n\nif (!p || typeof p !== 'object') {\n  // Model/network failure: fall back to a reviewable classification instead\n  // of dropping the email silently.\n  return [{ json: {\n    valid: true,\n    emailId: email.emailId,\n    category: 'autre',\n    priority: 1,\n    summary: 'Classification IA indisponible. À vérifier manuellement.',\n    expectedAction: 'Reclasser manuellement cet e-mail.',\n    needsReview: true\n  } }];\n}\n\nconst validCategory = categories.includes(p.category);\nconst category = validCategory ? p.category : 'autre';\nconst priority = [1, 2, 3].includes(p.priority) ? p.priority : 1;\nconst summary = (typeof p.summary === 'string' && p.summary.trim())\n  ? p.summary.trim().slice(0, 500)\n  : 'Classification indisponible. À vérifier manuellement.';\nconst expectedAction = (typeof p.expectedAction === 'string' && p.expectedAction.trim())\n  ? p.expectedAction.trim().slice(0, 500)\n  : 'À vérifier manuellement.';\nconst needsReview = !validCategory || !p.summary || !p.expectedAction;\n\nreturn [{ json: { valid: true, emailId: email.emailId, category, priority, summary, expectedAction, needsReview } }];"
+      },
+      "id": "a2000000-0000-4000-8000-000000000007",
+      "name": "Valider la sortie IA",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.BACKEND_BASE_URL }}/api/v1/webhooks/classification/results",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Webhook-Secret",
+              "value": "={{ $env.N8N_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ results: [ { emailId: $json.emailId, category: $json.category, priority: $json.priority, summary: $json.summary, expectedAction: $json.expectedAction, needsReview: $json.needsReview } ] }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "a2000000-0000-4000-8000-000000000008",
+      "name": "Enregistrer la classification",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1540,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {},
+      "id": "a2000000-0000-4000-8000-000000000009",
+      "name": "Terminé",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1100,
+        200
+      ]
+    }
+  ],
+  "connections": {
+    "Toutes les 2 minutes": {
+      "main": [
+        [
+          {
+            "node": "E-mails à classer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "E-mails à classer": {
+      "main": [
+        [
+          {
+            "node": "Des e-mails en attente ?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Des e-mails en attente ?": {
+      "main": [
+        [
+          {
+            "node": "Préparer les e-mails",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Préparer les e-mails": {
+      "main": [
+        [
+          {
+            "node": "Un par un",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Un par un": {
+      "main": [
+        [
+          {
+            "node": "Terminé",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Classer avec l'IA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classer avec l'IA": {
+      "main": [
+        [
+          {
+            "node": "Valider la sortie IA",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Valider la sortie IA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valider la sortie IA": {
+      "main": [
+        [
+          {
+            "node": "Enregistrer la classification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enregistrer la classification": {
+      "main": [
+        [
+          {
+            "node": "Un par un",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "versionId": "usts-classification-v1",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}

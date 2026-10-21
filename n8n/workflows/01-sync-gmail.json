@@ -1,0 +1,187 @@
+{
+  "id": "usts-sync-gmail",
+  "name": "01 - Synchronisation Gmail",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000001",
+      "name": "Nouveaux e-mails",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_WITH_GMAIL_CREDENTIAL_ID",
+          "name": "Gmail account"
+        }
+      },
+      "notes": "Sonde la boîte aux lettres. Associez vos identifiants OAuth2 Gmail."
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "get",
+        "messageId": "={{ $json.id }}",
+        "simple": false,
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000002",
+      "name": "Lire le message",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        220,
+        0
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_WITH_GMAIL_CREDENTIAL_ID",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const m = $json;\nconst headers = (m.payload && m.payload.headers) || [];\nconst get = (name) => (headers.find(h => String(h.name).toLowerCase() === name) || {}).value || '';\nconst parts = (m.payload && m.payload.parts) || [];\nconst decode = (data) => Buffer.from(data || '', 'base64').toString('utf-8');\n\nlet text = m.text || m.snippet || '';\nif (!text || text === m.snippet) {\n  const plain = parts.find(p => p.mimeType === 'text/plain' && p.body && p.body.data);\n  if (plain) text = decode(plain.body.data);\n}\n\nconst recipients = [get('to'), get('cc'), get('bcc')]\n  .filter(Boolean)\n  .join(',')\n  .split(',')\n  .map(s => s.trim())\n  .filter(Boolean);\n\nconst receivedAt = new Date(Number(m.internalDate || Date.now())).toISOString();\n\nreturn [{\n  json: {\n    mailbox: $env.MAILBOX_ADDRESS,\n    cursor: String(m.internalDate || ''),\n    executionId: $execution.id,\n    messages: [{\n      gmailMessageId: m.id,\n      gmailThreadId: m.threadId,\n      sender: get('from'),\n      recipients,\n      subject: get('subject'),\n      bodyText: String(text).slice(0, 400000),\n      receivedAt\n    }]\n  }\n}];"
+      },
+      "id": "a1000000-0000-4000-8000-000000000003",
+      "name": "Normaliser",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.BACKEND_BASE_URL }}/api/v1/webhooks/sync/import",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Webhook-Secret",
+              "value": "={{ $env.N8N_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "a1000000-0000-4000-8000-000000000004",
+      "name": "Importer (dédupliqué)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.BACKEND_BASE_URL }}/api/v1/webhooks/sync/run",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Webhook-Secret",
+              "value": "={{ $env.N8N_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ mailbox: $env.MAILBOX_ADDRESS, executionId: $execution.id, status: 'SUCCESS', cursorEnd: $('Normaliser').item.json.cursor, importedCount: 1, updatedCount: 0, skippedCount: 0, failedCount: 0 }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "a1000000-0000-4000-8000-000000000005",
+      "name": "Rapporter le curseur",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Nouveaux e-mails": {
+      "main": [
+        [
+          {
+            "node": "Lire le message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lire le message": {
+      "main": [
+        [
+          {
+            "node": "Normaliser",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normaliser": {
+      "main": [
+        [
+          {
+            "node": "Importer (dédupliqué)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Importer (dédupliqué)": {
+      "main": [
+        [
+          {
+            "node": "Rapporter le curseur",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "versionId": "usts-sync-gmail-v1",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
