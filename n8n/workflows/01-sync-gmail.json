@@ -1,49 +1,42 @@
 {
   "id": "usts-sync-gmail",
-  "name": "01 - Synchronisation Gmail",
+  "name": "01 - Synchronisation Gmail (IMAP)",
   "active": false,
   "nodes": [
     {
       "parameters": {
-        "rule": {
-          "interval": [
-            {
-              "field": "minutes",
-              "minutesInterval": 10
-            }
-          ]
+        "mailbox": "INBOX",
+        "postProcessAction": "nothing",
+        "format": "simple",
+        "options": {
+          "customEmailConfig": "[\"UNSEEN\"]",
+          "trackLastMessageId": true
         }
       },
-      "id": "a1000000-0000-4000-8000-000000000001",
-      "name": "Toutes les 10 minutes",
-      "type": "n8n-nodes-base.scheduleTrigger",
-      "typeVersion": 1.2,
+      "id": "b1000000-0000-4000-8000-000000000001",
+      "name": "Nouveaux e-mails (IMAP)",
+      "type": "n8n-nodes-base.emailReadImap",
+      "typeVersion": 2.2,
       "position": [
         0,
         0
-      ]
+      ],
+      "credentials": {
+        "imap": {
+          "id": "usts-gmail-imap",
+          "name": "Boîte mail IMAP"
+        }
+      },
+      "notes": "Boîte IMAP (GreenMail local ou Gmail App Password). Aucun message n'est marqué comme lu. La déduplication backend absorbe les relectures."
     },
     {
       "parameters": {
-        "method": "GET",
-        "url": "={{ $env.BACKEND_BASE_URL }}/api/v1/webhooks/sync/state?mailbox={{ $env.MAILBOX_ADDRESS }}",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "X-Webhook-Secret",
-              "value": "={{ $env.N8N_WEBHOOK_SECRET }}"
-            }
-          ]
-        },
-        "options": {
-          "timeout": 15000
-        }
+        "jsCode": "const clean = (v) => String(v || '').trim().replace(/^<|>$/g, '');\nconst stripHtml = (html) => String(html || '')\n  .replace(/<style[\\s\\S]*?<\\/style>/gi, ' ')\n  .replace(/<script[\\s\\S]*?<\\/script>/gi, ' ')\n  .replace(/<[^>]+>/g, ' ')\n  .replace(/&nbsp;/gi, ' ')\n  .replace(/&amp;/gi, '&')\n  .replace(/\\s+/g, ' ')\n  .trim();\n\nconst messages = [];\nfor (const item of $input.all()) {\n  const j = item.json || {};\n  const meta = j.metadata || {};\n  const uid = j.attributes && j.attributes.uid ? String(j.attributes.uid) : '';\n\n  const messageId = clean(meta['message-id'] || j['message-id'] || '') || `imap-${uid || Date.now()}`;\n  const references = String(meta.references || j.references || '').match(/<[^>]+>/g) || [];\n  const inReplyTo = clean(meta['in-reply-to'] || j['in-reply-to'] || '');\n  const threadId = references.length ? clean(references[0]) : (inReplyTo || messageId);\n\n  const recipients = [j.to, j.cc]\n    .filter(Boolean)\n    .join(',')\n    .split(',')\n    .map((s) => s.trim())\n    .filter(Boolean);\n\n  const parsed = new Date(j.date || meta.date || Date.now());\n  const receivedAt = Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();\n  const bodyText = j.textPlain ? String(j.textPlain) : stripHtml(j.textHtml || j.text || '');\n\n  messages.push({ json: {\n    gmailMessageId: messageId.slice(0, 255),\n    gmailThreadId: threadId.slice(0, 255),\n    sender: String(j.from || meta.from || '').slice(0, 500),\n    recipients,\n    subject: String(j.subject || '(sans objet)').slice(0, 1000),\n    bodyText: bodyText.slice(0, 400000),\n    receivedAt\n  } });\n}\n\nreturn messages.filter((m) => m.json.gmailMessageId && m.json.sender);"
       },
-      "id": "a1000000-0000-4000-8000-000000000002",
-      "name": "Lire le curseur",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
+      "id": "b1000000-0000-4000-8000-000000000002",
+      "name": "Normaliser (IMAP)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
       "position": [
         220,
         0
@@ -51,54 +44,14 @@
     },
     {
       "parameters": {
-        "jsCode": "const cursor = $json.data && $json.data.cursor ? String($json.data.cursor) : null;\n\n// The cursor is stored in epoch SECONDS. Gmail's `after:` operator also uses\n// seconds. We re-read one second before the cursor to avoid losing messages\n// that share the boundary timestamp; the backend deduplicates by message id.\nlet q = 'newer_than:1d';\nif (cursor && /^\\d+$/.test(cursor)) {\n  const from = Math.max(0, Number(cursor) - 1);\n  q = 'after:' + from;\n}\n\nreturn [{ json: { q, cursorStart: cursor } }];"
+        "jsCode": "const messages = $input.all().map((item) => item.json).filter((m) => m.gmailMessageId);\nif (messages.length === 0) return [];\n\nconst CHUNK = 50;\nconst cursorEnd = String(Math.floor(Date.now() / 1000));\nconst chunks = [];\nfor (let i = 0; i < messages.length; i += CHUNK) {\n  chunks.push({ json: {\n    mailbox: $env.MAILBOX_ADDRESS,\n    cursor: null,\n    executionId: $execution.id,\n    messages: messages.slice(i, i + CHUNK),\n    _cursorEnd: cursorEnd\n  } });\n}\nreturn chunks;"
       },
-      "id": "a1000000-0000-4000-8000-000000000003",
-      "name": "Calculer la requête",
+      "id": "b1000000-0000-4000-8000-000000000003",
+      "name": "Découper en lots",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
         440,
-        0
-      ]
-    },
-    {
-      "parameters": {
-        "resource": "message",
-        "operation": "getAll",
-        "returnAll": true,
-        "simple": false,
-        "filters": {
-          "q": "={{ $json.q }}"
-        },
-        "options": {}
-      },
-      "id": "a1000000-0000-4000-8000-000000000004",
-      "name": "Lister tous les messages",
-      "type": "n8n-nodes-base.gmail",
-      "typeVersion": 2.1,
-      "position": [
-        660,
-        0
-      ],
-      "credentials": {
-        "gmailOAuth2": {
-          "id": "REPLACE_WITH_GMAIL_CREDENTIAL_ID",
-          "name": "Gmail account"
-        }
-      },
-      "notes": "Return All = n8n suit automatiquement les pageToken Gmail."
-    },
-    {
-      "parameters": {
-        "jsCode": "const items = $input.all();\n\nconst headersOf = (m) => (m.payload && m.payload.headers) || [];\nconst getHeader = (headers, name) => {\n  const found = headers.find(h => String(h.name).toLowerCase() === name);\n  return found ? found.value : '';\n};\nconst decode = (data) => Buffer.from(data || '', 'base64').toString('utf-8');\nconst bodyOf = (m) => {\n  const parts = (m.payload && m.payload.parts) || [];\n  if (m.text) return m.text;\n  const plain = parts.find(p => p.mimeType === 'text/plain' && p.body && p.body.data);\n  if (plain) return decode(plain.body.data);\n  return m.snippet || '';\n};\n\nlet cursorEnd = 0;\nconst messages = [];\n\nfor (const item of items) {\n  const m = item.json || {};\n  if (!m.id) continue;\n  const headers = headersOf(m);\n  const internalSeconds = Math.floor(Number(m.internalDate || Date.now()) / 1000);\n  if (internalSeconds > cursorEnd) cursorEnd = internalSeconds;\n\n  const recipients = [getHeader(headers, 'to'), getHeader(headers, 'cc'), getHeader(headers, 'bcc')]\n    .filter(Boolean)\n    .join(',')\n    .split(',')\n    .map(s => s.trim())\n    .filter(Boolean);\n\n  messages.push({\n    gmailMessageId: m.id,\n    gmailThreadId: m.threadId,\n    sender: getHeader(headers, 'from'),\n    recipients,\n    subject: getHeader(headers, 'subject'),\n    bodyText: String(bodyOf(m)).slice(0, 400000),\n    receivedAt: new Date(internalSeconds * 1000).toISOString()\n  });\n}\n\nif (messages.length === 0) {\n  return [];\n}\n\n// Chunk into batches the backend accepts (max 100).\nconst CHUNK = 50;\nconst chunks = [];\nfor (let i = 0; i < messages.length; i += CHUNK) {\n  const isLast = i + CHUNK >= messages.length;\n  chunks.push({\n    json: {\n      mailbox: $env.MAILBOX_ADDRESS,\n      // Advance the durable cursor only on the final chunk: if an earlier\n      // chunk fails, the workflow stops and the cursor stays put, so the\n      // next run retries the whole window (dedup absorbs the overlap).\n      cursor: isLast && cursorEnd ? String(cursorEnd) : null,\n      executionId: $execution.id,\n      messages: messages.slice(i, i + CHUNK),\n      _cursorEnd: cursorEnd ? String(cursorEnd) : null\n    }\n  });\n}\n\nreturn chunks;"
-      },
-      "id": "a1000000-0000-4000-8000-000000000005",
-      "name": "Normaliser et découper",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        880,
         0
       ]
     },
@@ -122,12 +75,12 @@
           "timeout": 30000
         }
       },
-      "id": "a1000000-0000-4000-8000-000000000006",
+      "id": "b1000000-0000-4000-8000-000000000004",
       "name": "Importer par lots (dédupliqué)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1100,
+        660,
         0
       ],
       "retryOnFail": true,
@@ -136,14 +89,14 @@
     },
     {
       "parameters": {
-        "jsCode": "const responses = $input.all();\nlet imported = 0;\nlet skipped = 0;\nfor (const r of responses) {\n  const d = (r.json && r.json.data) || {};\n  imported += Number(d.imported || 0);\n  skipped += Number(d.skipped || 0);\n}\nconst first = $('Normaliser et découper').first().json;\nreturn [{ json: {\n  mailbox: $env.MAILBOX_ADDRESS,\n  executionId: $execution.id,\n  status: 'SUCCESS',\n  cursorStart: $('Calculer la requête').first().json.cursorStart,\n  cursorEnd: first._cursorEnd || null,\n  importedCount: imported,\n  updatedCount: 0,\n  skippedCount: skipped,\n  failedCount: 0\n} }];"
+        "jsCode": "const responses = $input.all();\nlet imported = 0;\nlet skipped = 0;\nfor (const r of responses) {\n  const d = (r.json && r.json.data) || {};\n  imported += Number(d.imported || 0);\n  skipped += Number(d.skipped || 0);\n}\nconst first = $('Découper en lots').first().json;\nreturn [{ json: {\n  mailbox: $env.MAILBOX_ADDRESS,\n  executionId: $execution.id,\n  status: 'SUCCESS',\n  cursorStart: null,\n  cursorEnd: first._cursorEnd || null,\n  importedCount: imported,\n  updatedCount: 0,\n  skippedCount: skipped,\n  failedCount: 0\n} }];"
       },
-      "id": "a1000000-0000-4000-8000-000000000007",
+      "id": "b1000000-0000-4000-8000-000000000005",
       "name": "Agréger les résultats",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1320,
+        880,
         0
       ]
     },
@@ -167,12 +120,12 @@
           "timeout": 15000
         }
       },
-      "id": "a1000000-0000-4000-8000-000000000008",
+      "id": "b1000000-0000-4000-8000-000000000006",
       "name": "Rapporter l'exécution",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1540,
+        1100,
         0
       ],
       "retryOnFail": true,
@@ -181,51 +134,29 @@
     }
   ],
   "connections": {
-    "Toutes les 10 minutes": {
+    "Nouveaux e-mails (IMAP)": {
       "main": [
         [
           {
-            "node": "Lire le curseur",
+            "node": "Normaliser (IMAP)",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Lire le curseur": {
+    "Normaliser (IMAP)": {
       "main": [
         [
           {
-            "node": "Calculer la requête",
+            "node": "Découper en lots",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Calculer la requête": {
-      "main": [
-        [
-          {
-            "node": "Lister tous les messages",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Lister tous les messages": {
-      "main": [
-        [
-          {
-            "node": "Normaliser et découper",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Normaliser et découper": {
+    "Découper en lots": {
       "main": [
         [
           {
@@ -263,7 +194,7 @@
     "executionOrder": "v1"
   },
   "pinData": {},
-  "versionId": "usts-sync-gmail-v2",
+  "versionId": "usts-sync-gmail-v3",
   "meta": {
     "templateCredsSetupCompleted": false
   },

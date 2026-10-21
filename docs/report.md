@@ -29,8 +29,8 @@ docker compose exec backend node database/seed.js
 - Application : http://localhost:5173
 - Connexion : `demo@example.com` / `demo1234`
 - API : http://localhost:4000/api/v1
-- Documentation interactive : http://localhost:4000/api/docs
-- Spécification OpenAPI 3 : http://localhost:4000/api/docs.json
+- Documentation interactive : http://localhost:4000/swagger-docs
+- Spécification OpenAPI 3 : http://localhost:4000/swagger-docs.json
 - n8n : http://localhost:5678
 
 Les migrations sont appliquées automatiquement au démarrage du backend
@@ -65,7 +65,7 @@ Backend Express ────── SQL ──────► PostgreSQL 16
       │  ▲
       │  │ webhooks X-Webhook-Secret
       ▼  │
-      n8n ──► Gmail (OAuth2) / fournisseur IA
+      n8n ──► GreenMail local ou Gmail (IMAP/SMTP) / fournisseur IA
 ```
 
 - Le navigateur ne contacte **jamais** n8n.
@@ -92,7 +92,8 @@ Contraintes déterminantes :
 - `replies` : `idempotency_key` unique + journal `idempotency_records`
   (clé + type d'opération + empreinte de requête).
 - `threads` : unique `(normalize_email(mailbox), gmail_thread_id)`.
-- `sync_state` : curseur durable par boîte.
+- `sync_state` : état de synchronisation par boîte (curseur historique conservé
+  pour compatibilité).
 
 Le schéma complet et les flux sont détaillés dans
 [`architecture.md`](architecture.md) ; les routes dans [`api.md`](api.md).
@@ -108,7 +109,7 @@ Le schéma complet et les flux sont détaillés dans
 | Vue 3 + Composition API | Interface réactive et légère, composants locaux, build rapide. |
 | Quatre workflows n8n | Isolation des pannes, activation indépendante, reprise ciblée, lisibilité. |
 | Abstraction IA `mock` / `groq` | Démonstration et tests hors ligne, passage au réel sans changer le code métier. |
-| Outbox d'envoi + états | Une transaction ne peut pas être atomique avec un envoi Gmail : `UNKNOWN` est un état de premier ordre. |
+| Outbox d'envoi + états | Une transaction ne peut pas être atomique avec un envoi SMTP : `UNKNOWN` est un état de premier ordre. |
 
 ### Fiabilité de l'envoi
 
@@ -121,13 +122,15 @@ Le schéma complet et les flux sont détaillés dans
 5. Seul `FAILED` est réessayable ; `UNKNOWN` exige une réconciliation.
 6. Balayage périodique : un `SENDING` de plus de 15 minutes devient `UNKNOWN`.
 
-### Synchronisation incrémentale
+### Synchronisation IMAP
 
-- Curseur lu côté backend (`sync_state`).
-- Requête Gmail `after:<curseur>` + pagination automatique (`Return All`).
-- Lots de 50 messages (limite backend : 100).
-- Le curseur n'avance qu'après le **dernier** lot : une panne intermédiaire
-  rejoue la fenêtre, et la déduplication absorbe le recouvrement.
+- Workflow 01 déclenché par IMAP sur `INBOX` avec la recherche `["UNSEEN"]`.
+- Les messages sont normalisés (`Message-ID`, `References`, corps texte) puis
+  envoyés par lots de 50 à `POST /webhooks/sync/import`.
+- Déduplication backend sur `(mailbox, gmail_message_id)` : une relecture IMAP
+  ne crée pas de doublon.
+- n8n suit le dernier UID (`trackLastMessageId`) ; `sync_runs` journalise chaque
+  exécution et `sync_state.cursor` reste exposé pour compatibilité.
 
 ## 5. Difficultés rencontrées et solutions
 
@@ -136,12 +139,13 @@ Le schéma complet et les flux sont détaillés dans
 | Double clic / requêtes concurrentes créant deux envois | Verrou consultatif + contrainte unique + empreinte de requête. |
 | Réutilisation d'une clé avec un autre contenu | `409 IDEMPOTENCY_CONFLICT` grâce à l'empreinte. |
 | Panne entre `SENDING` et le retour du workflow | État `UNKNOWN` + réconciliation, jamais de renvoi aveugle. |
-| Curseur avancé alors qu'un lot a échoué | Avance du curseur uniquement sur le dernier lot. |
+| Relecture IMAP des mêmes messages | Déduplication `(mailbox, gmail_message_id)` + suivi du dernier UID. |
 | Sortie IA non JSON ou hors schéma | Validation Joi, une nouvelle tentative, puis `autre` + `needsReview`. |
 | Quota IA (HTTP 429) | Trois tentatives avec pause de 20 s + pause de 2 s entre e-mails. |
 | Webhook forgé | Secret partagé comparé à temps constant. |
-| Envoi Gmail ambigu (timeout) | Classé `UNKNOWN` (le message a peut-être été délivré). |
-| Ports hôte Docker indisponibles sur la machine de vérification | Vérification réalisée avec un PostgreSQL Podman local (port 5434) et le proxy Vite ; le `docker-compose.yml` reste la cible de déploiement. |
+| Envoi ambigu (timeout) | Classé `UNKNOWN` (le message a peut-être été délivré). |
+| Ports hôte Docker indisponibles sur la machine de vérification | Vérification initiale avec un PostgreSQL Podman local (port 5434) et le proxy Vite ; le stack Compose tourne désormais sur les ports 3000/5000/5433/5678. |
+| Résolution DNS externe des conteneurs | Build des images avec `--add-host` pour npm ; correctif permanent du DNS Docker documenté. |
 
 ## 6. Résultats mesurés
 
@@ -156,18 +160,20 @@ backend Node 22.
 | Tests backend | **51 réussis / 51** | Vitest + Supertest, base isolée |
 | Tests frontend | **3 réussis / 3** | Vitest + Vue Test Utils |
 | Build frontend | **succès** | Vite, ~1,1 s |
+| Synchronisation IMAP locale | **succès** | GreenMail, workflow 01, e-mail importé |
+| Envoi SMTP local | **SENT** | GreenMail, workflow 03, `providerMessageId` retourné |
 
 **Portée honnête de ces mesures :**
 
 - La durée mesurée couvre l'**ingestion backend** des 30 e-mails, pas le temps
-  réseau Gmail (aucun identifiant OAuth2 disponible).
+  réseau d'une boîte réelle.
 - Le taux de 100 % porte sur le provider `mock`, qui produit toujours un JSON
   conforme. Le taux du modèle réel (Groq) n'a pas été mesuré faute de clé ;
   le pipeline de validation et le repli ont en revanche été testés.
-- Les workflows n8n ont été validés structurellement (JSON, références de
-  nœuds, contrats de webhooks) mais **pas exécutés** : l'environnement de
-  vérification ne disposait ni de Gmail ni d'un accès réseau Docker
-  fonctionnel. Ils sont donc livrés inactifs et documentés.
+- Les workflows n8n ont été exécutés contre la **boîte locale GreenMail** :
+  synchronisation IMAP (e-mail importé) et envoi SMTP (statut `SENT`,
+  `providerMessageId` retourné) vérifiés. Un compte Gmail réel n'a pas été
+  testé.
 
 ## 7. Tests automatisés
 
@@ -199,8 +205,9 @@ cd apps/frontend && npm test
 
 ## 9. Limites et améliorations
 
-- **Gmail / IA réels non exécutés** dans cet environnement : prévoir un compte
-  de test et une clé Groq pour la recette finale.
+- **Gmail réel / IA réelle non exécutés** dans cet environnement : le mode
+  local GreenMail est vérifié, mais prévoir un compte de test et une clé Groq
+  pour la recette finale.
 - **Frontend en mode développement** dans Compose ; servir le build statique
   derrière un reverse proxy en production.
 - **Signature HMAC du corps** des webhooks en plus du secret partagé.
@@ -208,7 +215,7 @@ cd apps/frontend && npm test
 - **Masquage** des téléphones/IBAN avant envoi à l'IA.
 - **Réponse automatique** encadrée pour une seule catégorie, avec garde-fou.
 - **Réconciliation semi-automatique** : proposer à l'opérateur de vérifier le
-  fil Gmail avant de résoudre un `UNKNOWN`.
+  fil de la boîte avant de résoudre un `UNKNOWN`.
 - **Multi-boîtes / multi-utilisateurs** : le modèle est prêt (`mailbox_address`)
   mais l'interface ne gère qu'une boîte.
-- **Génération de client** à partir de la spécification OpenAPI (`/api/docs.json`).
+- **Génération de client** à partir de la spécification OpenAPI (`/swagger-docs.json`).

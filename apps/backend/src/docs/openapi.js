@@ -1,6 +1,6 @@
 /**
  * OpenAPI 3.0 description of the public API and the n8n webhooks.
- * Served by Swagger UI at /api/docs and as JSON at /api/docs.json.
+ * Served by Swagger UI at /swagger-docs and as JSON at /swagger-docs.json.
  *
  * Kept as a plain object (rather than scattered annotations) so the
  * contract stays testable and cannot drift silently.

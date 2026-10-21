@@ -140,27 +140,28 @@
     },
     {
       "parameters": {
-        "resource": "message",
-        "operation": "send",
-        "sendTo": "={{ $json.body.to }}",
+        "fromEmail": "={{ $env.MAILBOX_ADDRESS }}",
+        "toEmail": "={{ $json.body.to }}",
         "subject": "={{ 'Re: ' + ($json.body.subject || 'votre message') }}",
-        "message": "={{ $json.body.body }}",
+        "emailFormat": "text",
+        "text": "={{ $json.body.body }}",
         "options": {
-          "threadId": "={{ $json.body.gmailThreadId }}"
+          "appendAttribution": false,
+          "replyTo": "={{ $env.MAILBOX_ADDRESS }}"
         }
       },
       "id": "a3000000-0000-4000-8000-000000000006",
-      "name": "Envoyer via Gmail",
-      "type": "n8n-nodes-base.gmail",
+      "name": "Envoyer via SMTP",
+      "type": "n8n-nodes-base.emailSend",
       "typeVersion": 2.1,
       "position": [
         660,
         0
       ],
       "credentials": {
-        "gmailOAuth2": {
-          "id": "REPLACE_WITH_GMAIL_CREDENTIAL_ID",
-          "name": "Gmail account"
+        "smtp": {
+          "id": "usts-gmail-smtp",
+          "name": "Boîte mail SMTP"
         }
       },
       "onError": "continueErrorOutput",
@@ -181,7 +182,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ replyId: $('Webhook envoi').item.json.body.replyId, status: 'SENT', providerMessageId: ($json.id || null) }) }}",
+        "jsonBody": "={{ JSON.stringify({ replyId: $('Webhook envoi').item.json.body.replyId, status: 'SENT', providerMessageId: ($json.messageId || null) }) }}",
         "options": {
           "timeout": 15000
         }
@@ -200,7 +201,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const body = $('Webhook envoi').item.json.body || {};\nconst err = $json.error || {};\nconst msg = String(err.message || err.description || 'Erreur inconnue lors de l’envoi Gmail').slice(0, 500);\n\n// A transport failure is ambiguous: the message may have been delivered.\n// Report UNKNOWN so the backend blocks a blind resend until reconciliation.\nconst ambiguous = /timeout|ETIMEDOUT|ECONNRESET|socket hang up|network|EAI_AGAIN|ENOTFOUND/i.test(msg);\n\nreturn [{ json: {\n  replyId: body.replyId,\n  status: ambiguous ? 'UNKNOWN' : 'FAILED',\n  errorCode: ambiguous ? 'NETWORK' : 'GMAIL_SEND_FAILED',\n  errorMessage: msg\n} }];"
+        "jsCode": "const body = $('Webhook envoi').item.json.body || {};\nconst err = $json.error || {};\nconst msg = String(err.message || err.description || 'Erreur inconnue lors de l’envoi SMTP').slice(0, 500);\n\n// A transport failure is ambiguous: the message may have been delivered.\n// Report UNKNOWN so the backend blocks a blind resend until reconciliation.\nconst ambiguous = /timeout|ETIMEDOUT|ECONNRESET|socket hang up|network|EAI_AGAIN|ENOTFOUND/i.test(msg);\n\nreturn [{ json: {\n  replyId: body.replyId,\n  status: ambiguous ? 'UNKNOWN' : 'FAILED',\n  errorCode: ambiguous ? 'NETWORK' : 'GMAIL_SEND_FAILED',\n  errorMessage: msg\n} }];"
       },
       "id": "a3000000-0000-4000-8000-000000000008",
       "name": "Classer l'échec",
@@ -312,7 +313,7 @@
       "main": [
         [
           {
-            "node": "Envoyer via Gmail",
+            "node": "Envoyer via SMTP",
             "type": "main",
             "index": 0
           }
@@ -326,7 +327,7 @@
         ]
       ]
     },
-    "Envoyer via Gmail": {
+    "Envoyer via SMTP": {
       "main": [
         [
           {
@@ -382,7 +383,7 @@
     "executionOrder": "v1"
   },
   "pinData": {},
-  "versionId": "usts-send-reply-v1",
+  "versionId": "usts-send-reply-v2",
   "meta": {
     "templateCredsSetupCompleted": false
   },

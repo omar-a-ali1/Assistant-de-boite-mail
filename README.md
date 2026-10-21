@@ -66,9 +66,10 @@ l'utilisateur) et envoi idempotent via n8n.
                                                       │ 03 envoi         │
                                                       │ 04 erreurs       │
                                                       └────────┬─────────┘
-                                                               │ OAuth2 / API
+                                                               │ IMAP / SMTP / API
                                                       ┌────────▼─────────┐
-                                                      │ Gmail + IA       │
+                                                      │ GreenMail / Gmail│
+                                                      │ + IA             │
                                                       └──────────────────┘
 ```
 
@@ -104,8 +105,8 @@ docker compose exec backend node database/seed.js
 
 - Application : http://localhost:5173
 - API : http://localhost:4000/api/v1
-- Documentation interactive (Swagger UI) : http://localhost:4000/api/docs
-- Spécification brute (OpenAPI 3) : http://localhost:4000/api/docs.json
+- Documentation interactive (Swagger UI) : http://localhost:4000/swagger-docs
+- Spécification brute (OpenAPI 3) : http://localhost:4000/swagger-docs.json
 - n8n : http://localhost:5678
 
 **Compte de démonstration** : `demo@example.com` / `demo1234`
@@ -184,13 +185,16 @@ machine à états d'envoi, réconciliation `SENDING → UNKNOWN`, secret de webh
 ## Workflows n8n
 
 Les quatre workflows sont dans [`n8n/workflows/`](n8n/workflows/) et sont
-**inactifs par défaut** (aucun identifiant en dur). Voir
-[`n8n/README.md`](n8n/README.md) pour l'import, les identifiants Gmail, les
-variables d'environnement et l'ordre d'activation.
+**inactifs par défaut** (aucun identifiant en dur). Le stack démarre une boîte
+locale **GreenMail** (`demo@example.com` / `demo1234`) : aucun secret n'est
+nécessaire. Voir [`n8n/README.md`](n8n/README.md) pour l'import, les variables
+d'environnement et l'ordre d'activation.
+`node n8n/scripts/apply-mail.js` importe les credentials et publie les
+workflows en mode local par défaut ; pour un vrai Gmail, renseigner
+`MAIL_MODE=gmail`, `MAILBOX_ADDRESS` et `GMAIL_APP_PASSWORD`.
 
-En **mode démonstration** (sans Gmail), laissez-les inactifs : l'application
-reste entièrement utilisable et n'affiche jamais un envoi comme réussi
-(statut `NO_WORKFLOW` explicite).
+Si les workflows restent inactifs, l'application est toujours utilisable et
+n'affiche jamais un envoi comme réussi (statut `NO_WORKFLOW` explicite).
 
 ## Sécurité
 
@@ -218,6 +222,7 @@ reste entièrement utilisable et n'affiche jamais un envoi comme réussi
 ├── docs                      # architecture, API, rapport
 ├── infra/postgres/init.sql   # base n8n
 ├── n8n
+│   ├── scripts               # import credentials + workflows boîte mail
 │   ├── workflows             # exports JSON
 │   └── README.md
 ├── docker-compose.yaml
@@ -227,11 +232,11 @@ reste entièrement utilisable et n'affiche jamais un envoi comme réussi
 
 ## Limites connues
 
-- L'envoi réel et la synchronisation Gmail nécessitent des identifiants OAuth2
-  Gmail et une clé IA ; sans eux, l'application fonctionne en mode
-  démonstration.
+- La boîte locale GreenMail permet la synchronisation IMAP et l'envoi SMTP
+  sans secret. Un vrai compte Gmail reste optionnel (`MAIL_MODE=gmail`) et
+  nécessite un **mot de passe d'application**.
 - La classification IA par défaut (`AI_PROVIDER=mock`) est déterministe et
-  hors ligne ; `AI_PROVIDER=groq` active un modèle réel.
+  hors ligne ; `AI_PROVIDER=groq` active un modèle réel avec une clé.
 - Le conteneur frontend lance le serveur de développement Vite ; pour la
   production, servir `npm run build` derrière un reverse proxy.
 - La signature HMAC des webhooks (en plus du secret partagé) et le temps réel

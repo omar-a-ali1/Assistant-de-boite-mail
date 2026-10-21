@@ -6,7 +6,7 @@
 Navigateur ──HTTP──► Backend Express ──SQL──► PostgreSQL
                           │  ▲
                           ▼  │ webhooks (X-Webhook-Secret)
-                         n8n ─┴──► Gmail / fournisseur IA
+                         n8n ─┴──► GreenMail / Gmail / fournisseur IA
 ```
 
 Le backend est le **seul point d'entrée applicatif** : il porte
@@ -21,8 +21,8 @@ exposé au navigateur.
 | `apps/frontend` | Interface responsive | Vue 3, Vite, Pinia, Vue Router, Tailwind v4 |
 | `apps/backend` | API REST, auth, règles métier, outbox d'envoi | Express CJS, `pg`, Joi, bcrypt |
 | PostgreSQL | Source de vérité durable | PostgreSQL 16, migrations SQL |
-| n8n | Intégrations Gmail et IA | Workflows JSON, webhooks |
-| Gmail / IA | Fournisseurs externes | OAuth2 Gmail, API compatible OpenAI |
+| n8n | Intégrations boîte mail et IA | Workflows JSON, webhooks |
+| GreenMail / Gmail / IA | Boîte locale de démo, Gmail optionnel, fournisseur IA | IMAP/SMTP (GreenMail local ou Gmail App Password), API compatible OpenAI |
 
 ### Frontend
 
@@ -56,7 +56,7 @@ Chaque ressource possède son routeur (`auth.route.js`, `email.route.js`,
 `draft.route.js`, `reply.route.js`) monté par `routes/index.js`. Les webhooks
 n8n restent isolés dans `routes/webhooks.js`, montés avant le contrôle CSRF
 puisqu'ils s'authentifient par `X-Webhook-Secret`. La spécification OpenAPI est
-exposée publiquement sur `/api/docs` (Swagger UI) et `/api/docs.json`.
+exposée publiquement sur `/swagger-docs` (Swagger UI) et `/swagger-docs.json`.
 
 Séparation stricte : les contrôleurs ne contiennent pas de SQL, les modèles ne
 contiennent pas de règles métier, les services orchestrent les transactions.
@@ -79,12 +79,12 @@ sync_state   sync_runs   audit_events
 | --- | --- | --- |
 | `users` | Comptes | e-mail unique insensible à la casse (`normalize_email`) |
 | `sessions` | Sessions serveur | gérées par `connect-pg-simple` |
-| `threads` | Fils Gmail | unique `(normalize_email(mailbox), gmail_thread_id)` |
+| `threads` | Fils de messages | unique `(normalize_email(mailbox), gmail_thread_id)` |
 | `emails` | Messages | unique `(normalize_email(mailbox), gmail_message_id)` ; statut, catégorie, priorité, `needs_review` |
 | `drafts` | Brouillons IA | ton ∈ `formal/neutral/short` |
 | `replies` | Outbox d'envoi | `idempotency_key` unique ; statut ∈ `PENDING/SENDING/SENT/FAILED/UNKNOWN` |
 | `idempotency_records` | Journal d'idempotence | unique `(idempotency_key, operation_type)` + empreinte de requête |
-| `sync_state` | Curseur durable | unique par boîte |
+| `sync_state` | État de synchronisation | unique par boîte ; curseur historique conservé pour compatibilité |
 | `sync_runs` | Historique de synchronisation | statut, compteurs, curseurs |
 | `audit_events` | Journal d'audit | métadonnées JSON assainies |
 
@@ -100,15 +100,18 @@ catégories, priorités et statuts variés.
 3. Un jeton CSRF est généré et renvoyé au client ; il sera exigé sur toutes
    les requêtes mutantes.
 
-### Import (n8n → backend)
+### Import (IMAP → backend)
 
-1. n8n lit le curseur via `GET /webhooks/sync/state`.
-2. Gmail est interrogé avec `after:<curseur>` et pagination automatique.
-3. Les messages sont normalisés puis envoyés par lots de 50 à
+1. Le workflow 01 est déclenché par IMAP sur `INBOX` (`["UNSEEN"]`).
+2. n8n normalise les messages (`Message-ID`, `References`, corps texte) et suit
+   le dernier UID pour ne pas relire indéfiniment les mêmes messages.
+3. Les messages sont envoyés par lots de 50 à
    `POST /webhooks/sync/import`.
 4. Chaque lot est traité dans **une transaction** : `upsert` du fil, puis
    `INSERT ... ON CONFLICT DO NOTHING` sur `(mailbox, gmail_message_id)`.
-5. Le curseur n'avance qu'après le **dernier** lot importé.
+5. `sync_runs` journalise l'exécution ; la déduplication absorbe les relectures.
+   L'endpoint `GET /webhooks/sync/state` et le curseur restent disponibles pour
+   compatibilité, mais ne pilotent plus le workflow IMAP.
 
 ### Classification IA
 
@@ -136,7 +139,7 @@ catégories, priorités et statuts variés.
    (`pg_advisory_xact_lock`) sur la clé, vérifie l'empreinte de la requête,
    crée `replies` + `idempotency_records`, puis valide.
 3. Après commit, il passe la réponse en `SENDING` et appelle le webhook n8n.
-4. n8n envoie via Gmail puis rappelle
+4. n8n envoie via SMTP puis rappelle
    `POST /webhooks/reply/outcome` avec `SENT`, `FAILED` ou `UNKNOWN`.
 5. `UNKNOWN` exige une réconciliation ; seul `FAILED` est réessayable.
 

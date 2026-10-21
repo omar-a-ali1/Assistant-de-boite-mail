@@ -45,9 +45,9 @@ function createApp() {
     res.removeHeader('Content-Security-Policy');
     next();
   };
-  app.get('/api/docs.json', allowInlineDocs, (req, res) => res.json(openapi));
+  app.get('/swagger-docs.json', allowInlineDocs, (req, res) => res.json(openapi));
   app.use(
-    '/api/docs',
+    '/swagger-docs',
     allowInlineDocs,
     swaggerUi.serve,
     swaggerUi.setup(openapi, {

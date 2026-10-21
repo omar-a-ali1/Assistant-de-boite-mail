@@ -6,8 +6,8 @@ Base URL : `http://localhost:4000/api/v1`
 
 La spécification OpenAPI 3 est servie par le backend :
 
-- Swagger UI : http://localhost:4000/api/docs
-- JSON brut : http://localhost:4000/api/docs.json
+- Swagger UI : http://localhost:4000/swagger-docs
+- JSON brut : http://localhost:4000/swagger-docs.json
 
 Elle couvre l'authentification, les e-mails, les brouillons, les réponses et
 les sept webhooks n8n, avec les schémas de requête/réponse et les exigences de
@@ -305,6 +305,11 @@ Réessaie uniquement une réponse `FAILED`. `409` sinon
 Toutes les routes ci-dessous exigent l'en-tête `X-Webhook-Secret`. Secret
 absent ou erroné → `401`.
 
+> Le workflow IMAP fourni n'utilise plus le curseur : il suit les UID IMAP et
+> envoie `cursor: null`. Les routes `sync/state` et le champ `cursor` restent
+> disponibles pour compatibilité et pour un éventuel client de synchronisation
+> manuel.
+
 ### `GET /webhooks/sync/state?mailbox=...`
 
 ```json
@@ -316,7 +321,7 @@ absent ou erroné → `401`.
 ```json
 {
   "mailbox": "demo@example.com",
-  "cursor": "1729500000",
+  "cursor": null,
   "executionId": "1234",
   "messages": [
     {

@@ -14,3 +14,7 @@ process.env.DATABASE_URL = process.env.DATABASE_URL_TEST;
 process.env.SESSION_SECRET = process.env.SESSION_SECRET || 'test-session-secret-0123456789';
 process.env.N8N_WEBHOOK_SECRET = process.env.N8N_WEBHOOK_SECRET || 'test-webhook-secret-0123456789';
 process.env.AI_PROVIDER = 'mock';
+// Tests must never reach a real n8n instance from the host.
+process.env.N8N_SYNC_WEBHOOK_URL = '';
+process.env.N8N_CLASSIFICATION_WEBHOOK_URL = '';
+process.env.N8N_SEND_REPLY_WEBHOOK_URL = '';

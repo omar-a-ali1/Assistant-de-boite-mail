@@ -1,24 +1,26 @@
 # Workflows n8n
 
 Quatre workflows automatisent la partie « boîte e-mail réelle ». Ils sont
-**désactivés par défaut** et n'ont aucun identifiant en dur : toutes les clés
-passent par des variables d'environnement ou par les identifiants n8n.
+**inactifs par défaut** et n'ont aucun secret en dur : les identifiants de la
+boîte passent par les credentials n8n, les autres clés par l'environnement.
 
 | Fichier | Rôle | Déclencheur |
 | --- | --- | --- |
-| `workflows/01-sync-gmail.json` | Synchronisation incrémentale par curseur, pagination et lots | Schedule (toutes les 10 min) |
+| `workflows/01-sync-gmail.json` | Synchronisation IMAP des nouveaux e-mails vers le backend | IMAP (nouvel e-mail) |
 | `workflows/02-classification.json` | Classe et résume les e-mails en attente via l'IA | Schedule (toutes les 2 min) |
-| `workflows/03-send-reply.json` | Envoie une réponse approuvée, puis rapporte le résultat | Webhook `POST /webhook/send-reply` |
+| `workflows/03-send-reply.json` | Envoie une réponse approuvée par SMTP, puis rapporte le résultat | Webhook `POST /webhook/send-reply` |
 | `workflows/04-error-handler.json` | Journalise les échecs de workflow dans le backend | Error Trigger |
 
 ## Comportements de fiabilité
 
-- **Curseur** : le workflow lit `GET /webhooks/sync/state`, interroge Gmail avec
-  `after:<curseur en secondes>` et ne fait avancer le curseur qu'après le
-  **dernier lot** importé. Une panne au milieu d'un lot laisse donc le curseur
-  intact ; la déduplication par `gmailMessageId` absorbe le recouvrement.
-- **Pagination** : le nœud Gmail `Get Many` est en *Return All*, n8n suit donc
-  automatiquement les `pageToken`.
+- **IMAP** : le workflow 01 écoute la boîte `INBOX` avec `["UNSEEN"]`. Il ne
+  marque pas les messages comme lus (`postProcessAction: nothing`) et suit le
+  dernier UID (`trackLastMessageId: true`) pour ne pas relire indéfiniment les
+  mêmes messages. Au premier démarrage, n8n récupère les non-lus depuis la date
+  d'activation.
+- **Déduplication** : chaque message est identifié par son `Message-ID` (ou son
+  UID IMAP à défaut) ; le backend ignore les doublons
+  (`ON CONFLICT DO NOTHING`). Une relecture IMAP ne crée donc pas de doublon.
 - **Lots** : les messages sont découpés par 50 (le backend accepte jusqu'à 100).
 - **Classification** : sortie validée contre une liste fermée ; en cas de JSON
   invalide, **une nouvelle tentative** est faite, puis repli sur `autre` avec
@@ -32,9 +34,9 @@ passent par des variables d'environnement ou par les identifiants n8n.
 ## Sens des appels
 
 ```
-Navigateur -> Backend (session + CSRF) -> n8n (X-Webhook-Secret) -> Gmail
-                                   ^                                  |
-                                   +---- webhooks de retour ----------+
+Navigateur -> Backend (session + CSRF) -> n8n (X-Webhook-Secret) -> boîte mail (IMAP/SMTP)
+                                   ^                                        |
+                                   +---- webhooks de retour ----------------+
 ```
 
 - Le **navigateur n'appelle jamais n8n** : seul le backend déclenche l'envoi.
@@ -43,12 +45,72 @@ Navigateur -> Backend (session + CSRF) -> n8n (X-Webhook-Secret) -> Gmail
   explicite du workflow. Un échec réseau devient `UNKNOWN` (jamais renvoyé
   automatiquement).
 
-## Prérequis
+## Boîte mail locale (par défaut)
 
-Variables d'environnement (déjà transmises au conteneur n8n par
-`docker-compose.yaml`) :
+Aucun compte externe ni secret n'est nécessaire. Le stack Compose démarre
+**GreenMail** avec une boîte de démonstration :
 
+| Paramètre | Valeur |
+| --- | --- |
+| Adresse | `demo@example.com` |
+| Mot de passe | `demo1234` |
+| IMAP (réseau Compose) | `greenmail:3143`, sans TLS |
+| SMTP (réseau Compose) | `greenmail:3025`, sans TLS |
+| IMAP/SMTP depuis l'hôte | `127.0.0.1:3143` / `127.0.0.1:3025` |
+
+`MAIL_MODE=local` est la valeur par défaut. Le script d'import configure les
+credentials n8n sur cette boîte ; aucune modification de `.env` n'est requise.
+
+Pour envoyer un e-mail de test depuis l'hôte :
+
+```bash
+python3 - <<'PY'
+import smtplib
+from email.message import EmailMessage
+
+msg = EmailMessage()
+msg['From'] = 'Client Test <client.test@example.com>'
+msg['To'] = 'demo@example.com'
+msg['Subject'] = 'Demande de devis - test local'
+msg.set_content('Bonjour, pouvez-vous me faire parvenir un devis ?')
+
+with smtplib.SMTP('127.0.0.1', 3025, timeout=10) as smtp:
+    smtp.send_message(msg)
+PY
 ```
+
+Le workflow 01 s'exécute, le message est importé, puis il apparaît dans
+l'application.
+
+## Gmail (optionnel)
+
+Pour utiliser un vrai compte Gmail à la place de GreenMail :
+
+1. Activer la **validation en deux étapes** sur le compte Google.
+2. Créer un **mot de passe d'application** sur
+   <https://myaccount.google.com/apppasswords>.
+3. Renseigner dans `.env` :
+
+```bash
+MAIL_MODE=gmail
+MAILBOX_ADDRESS=votre.adresse@gmail.com
+GMAIL_APP_PASSWORD=abcdefghijklmnop
+GMAIL_IMAP_HOST=imap.gmail.com
+GMAIL_IMAP_PORT=993
+GMAIL_SMTP_HOST=smtp.gmail.com
+GMAIL_SMTP_PORT=465
+```
+
+Le mot de passe d'application peut être saisi avec ou sans espaces ; le script
+d'import les retire. Ne jamais committer `.env`.
+
+> **DNS Docker** : si les conteneurs ne résolvent pas `imap.gmail.com` /
+> `smtp.gmail.com` (`EAI_AGAIN`), renseigner `DOCKER_DNS` dans `.env` avec le
+> DNS de votre réseau (voir `.env.example`), puis recréer les services.
+
+Variables transmises au conteneur n8n par les fichiers Compose :
+
+```bash
 BACKEND_BASE_URL=http://backend:4000
 N8N_WEBHOOK_SECRET=<même valeur que le backend>
 MAILBOX_ADDRESS=demo@example.com
@@ -59,54 +121,59 @@ AI_API_KEY=<clé Groq ou compatible OpenAI>
 
 Dans `.env`, pour que le backend puisse déclencher l'envoi :
 
-```
+```bash
 N8N_SEND_REPLY_WEBHOOK_URL=http://n8n:5678/webhook/send-reply
 ```
 
 `N8N_SYNC_WEBHOOK_URL` et `N8N_CLASSIFICATION_WEBHOOK_URL` peuvent rester
-vides : ces deux workflows fonctionnent sur planification.
+vides : la synchronisation est pilotée par IMAP et la classification par
+planification.
 
-## Importer les workflows
+## Importer et activer
+
+### Script automatique (recommandé)
+
+```bash
+node n8n/scripts/apply-mail.js
+```
+
+Le script :
+
+1. démarre GreenMail et attend qu'il soit joignable (`MAIL_MODE=local`), ou
+   vérifie les paramètres Gmail (`MAIL_MODE=gmail`) ;
+2. importe les credentials `Boîte mail IMAP` (`usts-gmail-imap`) et
+   `Boîte mail SMTP` (`usts-gmail-smtp`) ;
+3. importe les quatre workflows ;
+4. publie `01 - Synchronisation Gmail (IMAP)` et `03 - Envoi de réponse` ;
+5. publie `02 - Classification IA` uniquement si `AI_API_KEY` est renseignée ;
+6. recrée n8n pour charger les credentials et les workflows publiés.
+
+Le script ne journalise jamais le mot de passe et supprime les fichiers
+temporaires d'import.
 
 ### Via l'interface
 
-1. Ouvrir http://localhost:5678 et créer le compte propriétaire.
-2. **Workflows → Import from File** pour chacun des quatre fichiers.
-3. Ouvrir chaque workflow et **enregistrer**.
-
-### En ligne de commande
-
-```bash
-for f in n8n/workflows/*.json; do
-  docker compose cp "$f" n8n:/tmp/workflow.json
-  docker compose exec n8n n8n import:workflow --input=/tmp/workflow.json
-done
-```
-
-## Identifiants à associer
-
-1. **Gmail OAuth2** (workflows 01 et 03) : dans n8n, *Credentials → New →
-   Gmail OAuth2*. Renseignez `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET` et
-   `GMAIL_REDIRECT_URI`, puis remplacez le placeholder
-   `REPLACE_WITH_GMAIL_CREDENTIAL_ID` dans les nœuds en sélectionnant le
-   credential créé.
-2. **Clé IA** : aucun credential n8n n'est nécessaire, le workflow lit
-   `AI_API_KEY` dans l'environnement.
-3. **Workflow d'erreur** : dans les paramètres de chaque workflow, choisissez
-   `04 - Gestion des erreurs` comme *Error Workflow*.
+1. Ouvrir <http://localhost:5678> et créer le compte propriétaire.
+2. **Credentials → New** : créer `Boîte mail IMAP` (type IMAP) et
+   `Boîte mail SMTP` (type SMTP). En mode local : hôte `greenmail`, ports
+   `3143` / `3025`, sans TLS, utilisateur `demo@example.com`, mot de passe
+   `demo1234`.
+3. **Workflows → Import from File** pour chacun des quatre fichiers, puis
+   sélectionner les credentials dans les nœuds IMAP/SMTP.
+4. Publier les workflows.
 
 ## Activer
 
-Activez d'abord `03 - Envoi de réponse`, puis `02 - Classification IA`, puis
-`01 - Synchronisation Gmail`. Le workflow d'erreur n'a pas besoin d'être
-activé pour être utilisé comme *Error Workflow*.
+Le script publie déjà `03 - Envoi de réponse` et
+`01 - Synchronisation Gmail`. Pour le faire manuellement, publiez d'abord
+`03`, puis `02` (si une clé IA est disponible), puis `01`. Le workflow
+d'erreur n'a pas besoin d'être activé pour être utilisé comme *Error Workflow*.
 
-## Mode démonstration (sans Gmail)
+## Mode sans workflows
 
-Sans identifiants Gmail, laissez les workflows **inactifs**. L'application
-reste entièrement démontrable : import par `npm run seed`, classification IA
-côté backend (`AI_PROVIDER=mock` par défaut) et envoi de réponse enregistré
-en base. Le backend signale alors explicitement
+Si les workflows sont inactifs, l'application reste démontrable : import par
+`npm run seed`, classification IA côté backend (`AI_PROVIDER=mock` par défaut)
+et envoi de réponse enregistré en base. Le backend signale alors explicitement
 `NO_WORKFLOW` et n'affiche jamais un envoi comme réussi.
 
 ## Vérification
@@ -121,4 +188,5 @@ curl -i -X POST http://localhost:5678/webhook/send-reply \
 ```
 
 Après un envoi réel, vérifiez dans n8n l'exécution du workflow 03 puis, dans
-l'application, le statut `Envoyé` du fil concerné.
+l'application, le statut `Envoyé` du fil concerné. La boîte locale est
+inspectable via l'API GreenMail sur <http://localhost:8080>.

@@ -19,14 +19,14 @@ describe('API documentation', () => {
   });
 
   it('serves a valid OpenAPI document', async () => {
-    const res = await request(app).get('/api/docs.json').expect(200);
+    const res = await request(app).get('/swagger-docs.json').expect(200);
     expect(res.body.openapi).toMatch(/^3\./);
     expect(res.body.info.title).toContain('Assistant');
     expect(res.body.servers[0].url).toBe('/api/v1');
   });
 
   it('documents the split route modules and webhooks', async () => {
-    const res = await request(app).get('/api/docs.json').expect(200);
+    const res = await request(app).get('/swagger-docs.json').expect(200);
     const paths = Object.keys(res.body.paths);
 
     expect(paths).toEqual(
@@ -54,7 +54,7 @@ describe('API documentation', () => {
   });
 
   it('serves the Swagger UI', async () => {
-    const res = await request(app).get('/api/docs/').expect(200);
+    const res = await request(app).get('/swagger-docs/').expect(200);
     expect(res.text).toContain('swagger-ui');
   });
 });
