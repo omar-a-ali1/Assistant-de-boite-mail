@@ -9,7 +9,7 @@ const express = require('express');
 const crypto = require('node:crypto');
 const config = require('../config/env');
 const validate = require('../middlewares/validation.middleware');
-const schemas = require('../validation/schemas');
+const { importBatch, classificationBatch, replyOutcome, syncRunReport, workflowFailure } = require('../validation/webhook.validation');
 const { webhookLimiter } = require('../middlewares/rateLimit');
 const webhookController = require('../controllers/webhook.controller');
 
@@ -33,19 +33,19 @@ router.use(webhookLimiter);
 router.use(requireWebhookSecret);
 
 router.get('/sync/state', webhookController.getSyncState);
-router.post('/sync/import', validate(schemas.importBatch), webhookController.importEmails);
-router.post('/sync/run', validate(schemas.syncRunReport), webhookController.syncRun);
+router.post('/sync/import', validate(importBatch), webhookController.importEmails);
+router.post('/sync/run', validate(syncRunReport), webhookController.syncRun);
 
 router.get('/classification/pending', webhookController.pendingClassifications);
 router.post(
   '/classification/results',
-  validate(schemas.classificationBatch),
+  validate(classificationBatch),
   webhookController.saveClassifications
 );
 
-router.post('/reply/outcome', validate(schemas.replyOutcome), webhookController.replyOutcome);
+router.post('/reply/outcome', validate(replyOutcome), webhookController.replyOutcome);
 
-router.post('/workflow/failure', validate(schemas.workflowFailure), webhookController.workflowFailure);
+router.post('/workflow/failure', validate(workflowFailure), webhookController.workflowFailure);
 
 module.exports = router;
 module.exports.requireWebhookSecret = requireWebhookSecret;

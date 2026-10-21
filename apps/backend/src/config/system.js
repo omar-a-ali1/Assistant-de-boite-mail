@@ -30,6 +30,10 @@ const REPLY_STATUSES = ['PENDING', 'SENDING', 'SENT', 'FAILED', 'UNKNOWN'];
 /** Allowed draft tones. */
 const DRAFT_TONES = ['formal', 'neutral', 'short'];
 
+/** Gmail App Password bounds (Google issues 16, spaces are ignored). */
+const APP_PASSWORD_MIN_LENGTH = 8;
+const APP_PASSWORD_MAX_LENGTH = 64;
+
 /** Allowed sync run / sync state statuses. */
 const SYNC_STATUSES = ['RUNNING', 'SUCCESS', 'FAILED'];
 
@@ -45,6 +49,8 @@ module.exports = {
   PROCESSING_STATUSES,
   REPLY_STATUSES,
   DRAFT_TONES,
+  APP_PASSWORD_MIN_LENGTH,
+  APP_PASSWORD_MAX_LENGTH,
   SYNC_STATUSES,
   PRIORITY_LEVELS,
 };

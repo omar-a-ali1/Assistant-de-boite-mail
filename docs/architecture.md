@@ -49,7 +49,7 @@ src/
 ├── services/              # règles métier (auth, import, reply, ai, n8n, summary)
 ├── models/                # SQL paramétré
 ├── middlewares/           # auth, CSRF, validation, rate limit, erreurs
-├── validation/            # schémas Joi (HTTP + IA)
+├── validation/            # schémas Joi séparés par domaine (auth, mail, email, webhooks, IA)
 └── tests/                 # Vitest + Supertest
 ```
 
@@ -100,7 +100,7 @@ catégories, priorités et statuts variés.
 ### Inscription et connexion
 
 1. `POST /auth/register` exige une adresse Gmail et un mot de passe
-   d'application à 16 caractères. Le mot de passe d'application est vérifié par
+   d'application d'au moins 8 caractères (16 pour un vrai compte Google). Le mot de passe d'application est vérifié par
    IMAP + SMTP, puis chiffré en AES-256-GCM. Un doublon d'e-mail renvoie
    `409 EMAIL_ALREADY_EXISTS`.
 2. Le compte est créé, importé (25 derniers messages) et la session est ouverte

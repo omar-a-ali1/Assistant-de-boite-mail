@@ -8,7 +8,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vites
 const { prepareDatabase } = require('./helpers');
 const { closePool } = require('../config/db');
 const aiService = require('../services/ai.service');
-const { aiClassificationOutput } = require('../validation/schemas');
+const { aiClassificationOutput } = require('../validation/ai.validation');
 
 const sampleEmail = {
   subject: 'Facture impayée',

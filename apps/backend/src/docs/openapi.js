@@ -234,9 +234,11 @@ const openapi = {
           displayName: { type: 'string', maxLength: 100 },
           gmailAppPassword: {
             type: 'string',
+            minLength: 8,
+            maxLength: 64,
             example: 'abcd efgh ijkl mnop',
             description:
-              'Mot de passe d’application Google à 16 caractères (espaces autorisés). ' +
+              'Mot de passe d’application Google d’au moins 8 caractères (espaces autorisés ; 16 en pratique). ' +
               'La validation IMAP + SMTP prouve que la boîte existe.',
           },
         },
@@ -657,7 +659,12 @@ const openapi = {
                 type: 'object',
                 required: ['gmailAppPassword'],
                 properties: {
-                  gmailAppPassword: { type: 'string', example: 'abcd efgh ijkl mnop' },
+                  gmailAppPassword: {
+                    type: 'string',
+                    minLength: 8,
+                    maxLength: 64,
+                    example: 'abcd efgh ijkl mnop',
+                  },
                 },
               },
             },

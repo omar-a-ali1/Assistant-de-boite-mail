@@ -29,7 +29,7 @@ docker compose exec backend node database/seed.js
 
 - Application : http://localhost:5173
 - Connexion : `demo@example.com` / `demo1234`
-- Inscription : page `/register` (adresse Gmail + mot de passe d'application à 16 caractères)
+- Inscription : page `/register` (adresse Gmail + mot de passe d'application d'au moins 8 caractères)
 - API : http://localhost:4000/api/v1
 - Documentation interactive : http://localhost:4000/swagger-docs
 - Spécification OpenAPI 3 : http://localhost:4000/swagger-docs.json

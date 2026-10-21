@@ -30,7 +30,7 @@ exigences de sécurité (cookie de session, CSRF, `Idempotency-Key`,
 | --- | --- | --- |
 | 400 | `VALIDATION_ERROR` | Corps/paramètres invalides |
 | 400 | `GMAIL_ACCOUNT_REQUIRED` | L'adresse du compte n'est pas Gmail |
-| 400 | `GMAIL_APP_PASSWORD_INVALID` | Mot de passe d'application ≠ 16 caractères |
+| 400 | `GMAIL_APP_PASSWORD_INVALID` | Mot de passe d'application invalide (< 8 caractères) |
 | 400 | `IDEMPOTENCY_KEY_REQUIRED` | En-tête d'idempotence absent ou invalide |
 | 401 | `UNAUTHORIZED` | Session absente ou expirée |
 | 403 | `CSRF` | Jeton CSRF absent ou invalide |
@@ -74,8 +74,8 @@ derniers messages et ouvre immédiatement une session. L'adresse doit être
 }
 ```
 
-Le mot de passe d'application contient exactement 16 caractères alphanumériques
-(les espaces sont ignorés). Il est vérifié par IMAP et SMTP puis stocké chiffré
+Le mot de passe d'application contient au moins 8 caractères alphanumériques
+(les espaces sont ignorés ; Google en génère 16). Il est vérifié par IMAP et SMTP puis stocké chiffré
 (AES-256-GCM).
 
 `201`

@@ -113,7 +113,7 @@ docker compose exec backend node database/seed.js
 
 Un lien **Créer un compte** est disponible sur la page de connexion
 (`/register`). L'inscription exige une adresse **Gmail** et un **mot de passe
-d'application Google** à 16 caractères (validation en deux étapes activée).
+d'application Google** d'au moins 8 caractères (16 pour un vrai mot de passe Google, validation en deux étapes activée).
 Chaque compte importe et consulte uniquement sa propre boîte ; les données sont
 isolées par utilisateur. Un compte Gmail existant peut être connecté depuis
 l'application via **Connecter Gmail**.
@@ -249,11 +249,11 @@ n'affiche jamais un envoi comme réussi (statut `NO_WORKFLOW` explicite).
 ## Limites connues
 
 - L'inscription est ouverte et limitée par IP ; elle exige une adresse Gmail et
-  un **mot de passe d'application** Google. Les données sont isolées par
+  un **mot de passe d'application** Google d'au moins 8 caractères. Les données sont isolées par
   utilisateur, avec une seule boîte par compte.
 - La boîte locale GreenMail reste disponible pour le compte de démonstration
   (`demo@example.com`). Un compte Gmail réel nécessite la validation en deux
-  étapes et un mot de passe d'application à 16 caractères.
+  étapes et un mot de passe d'application d'au moins 8 caractères (16 en pratique).
 - La classification IA par défaut (`AI_PROVIDER=mock`) est déterministe et
   hors ligne ; `AI_PROVIDER=groq` active un modèle réel avec une clé.
 - Le conteneur frontend lance le serveur de développement Vite ; pour la

@@ -16,6 +16,7 @@ const syncModel = require('../models/sync.model');
 const importService = require('./import.service');
 const aiService = require('./ai.service');
 const { decryptSecret } = require('../utils/credentials');
+const { APP_PASSWORD_MIN_LENGTH, APP_PASSWORD_MAX_LENGTH } = require('../config/system');
 const AppError = require('../lib/errors/AppError');
 const logger = require('../utils/logger');
 
@@ -81,10 +82,14 @@ async function verifyGmailCredentials(email, appPassword) {
     );
   }
   const password = normalizeAppPassword(appPassword);
-  if (password.length !== 16) {
+  if (
+    password.length < APP_PASSWORD_MIN_LENGTH ||
+    password.length > APP_PASSWORD_MAX_LENGTH ||
+    !/^[A-Za-z0-9]+$/.test(password)
+  ) {
     throw new AppError(
       'GMAIL_APP_PASSWORD_INVALID',
-      'A Gmail App Password must contain 16 characters.',
+      `A Gmail App Password must contain ${APP_PASSWORD_MIN_LENGTH}-${APP_PASSWORD_MAX_LENGTH} letters or digits.`,
       400
     );
   }
@@ -95,7 +100,7 @@ async function verifyGmailCredentials(email, appPassword) {
     logger.warn('gmail_verification_failed', { code: err.code || err.responseCode || 'AUTH' });
     throw new AppError(
       'GMAIL_AUTH_FAILED',
-      'Gmail authentication failed. Check the address and the 16-character App Password.',
+      'Gmail authentication failed. Check the address and the App Password.',
       422
     );
   }

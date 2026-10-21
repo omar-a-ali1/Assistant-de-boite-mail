@@ -31,7 +31,7 @@ describe('ConnectGmailView', () => {
     const wrapper = mount(ConnectGmailView)
     await wrapper.find('#gmailAppPassword').setValue('too-short')
     await wrapper.find('form').trigger('submit')
-    expect(wrapper.find('[role="alert"]').text()).toContain('16 caractères')
+    expect(wrapper.find('[role="alert"]').text()).toContain('8 caractères')
     expect(mailApi.connect).not.toHaveBeenCalled()
   })
 

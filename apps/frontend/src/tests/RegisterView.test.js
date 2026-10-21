@@ -49,7 +49,7 @@ describe('RegisterView', () => {
     await fill(wrapper, 'password-123', 'password-123')
     await wrapper.find('#gmailAppPassword').setValue('too-short')
     await wrapper.find('form').trigger('submit')
-    expect(wrapper.find('[role="alert"]').text()).toContain('16 caractères')
+    expect(wrapper.find('[role="alert"]').text()).toContain('8 caractères')
     expect(authApi.register).not.toHaveBeenCalled()
   })
 

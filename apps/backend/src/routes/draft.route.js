@@ -8,7 +8,8 @@ const express = require('express');
 const validate = require('../middlewares/validation.middleware');
 const { validateParams } = require('../middlewares/validation.middleware');
 const { requireAuth } = require('../middlewares/auth');
-const schemas = require('../validation/schemas');
+const { draftCreate, draftUpdate } = require('../validation/draft.validation');
+const { idParam } = require('../validation/common.validation');
 const draftController = require('../controllers/draft.controller');
 
 const router = express.Router();
@@ -17,15 +18,15 @@ router.use(requireAuth);
 
 router.post(
   '/emails/:id/draft',
-  validateParams(schemas.idParam),
-  validate(schemas.draftCreate),
+  validateParams(idParam),
+  validate(draftCreate),
   draftController.createDraft
 );
 
 router.patch(
   '/drafts/:id',
-  validateParams(schemas.idParam),
-  validate(schemas.draftUpdate),
+  validateParams(idParam),
+  validate(draftUpdate),
   draftController.updateDraft
 );
 

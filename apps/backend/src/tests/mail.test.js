@@ -5,7 +5,8 @@
 import { describe, it, expect } from 'vitest';
 const mailService = require('../services/mail.service');
 const { encryptSecret, decryptSecret } = require('../utils/credentials');
-const { mailConnect, register } = require('../validation/schemas');
+const { mailConnect } = require('../validation/mail.validation');
+const { register } = require('../validation/auth.validation');
 
 describe('Gmail credential handling', () => {
   it('accepts only Gmail and Googlemail addresses', () => {
@@ -24,21 +25,22 @@ describe('Gmail credential handling', () => {
     ).rejects.toMatchObject({ code: 'GMAIL_ACCOUNT_REQUIRED', status: 400 });
   });
 
-  it('rejects App Passwords that are not 16 characters', async () => {
+  it('rejects App Passwords shorter than 8 characters', async () => {
     await expect(
       mailService.verifyGmailCredentials('user@gmail.com', 'too-short')
     ).rejects.toMatchObject({ code: 'GMAIL_APP_PASSWORD_INVALID', status: 400 });
   });
 
-  it('accepts 16 characters with or without display spaces in HTTP bodies', () => {
+  it('accepts 8 or 16 characters, with or without display spaces', () => {
+    expect(mailConnect.validate({ gmailAppPassword: 'abcdefgh' }).error).toBeUndefined();
     expect(mailConnect.validate({ gmailAppPassword: 'abcd efgh ijkl mnop' }).error).toBeUndefined();
     expect(mailConnect.validate({ gmailAppPassword: 'abcdefghijklmnop' }).error).toBeUndefined();
-    expect(register.validate({ email: 'a@gmail.com', password: 'password-1234', gmailAppPassword: 'abcd efgh ijkl mnop' }).error).toBeUndefined();
+    expect(register.validate({ email: 'a@gmail.com', password: 'password-1234', gmailAppPassword: 'abcdefgh' }).error).toBeUndefined();
   });
 
-  it('rejects App Passwords with fewer or more than 16 characters', () => {
-    expect(mailConnect.validate({ gmailAppPassword: 'abcdefghijklmno' }).error).toBeTruthy();
-    expect(mailConnect.validate({ gmailAppPassword: 'abcdefghijklmnopq' }).error).toBeTruthy();
+  it('rejects App Passwords shorter than 8 or longer than 64 characters', () => {
+    expect(mailConnect.validate({ gmailAppPassword: 'abcdefg' }).error).toBeTruthy();
+    expect(mailConnect.validate({ gmailAppPassword: 'a'.repeat(65) }).error).toBeTruthy();
   });
 
   it('encrypts App Passwords with authenticated encryption', () => {

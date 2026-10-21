@@ -10,7 +10,7 @@
  */
 const config = require('../config/env');
 const logger = require('../utils/logger');
-const { aiClassificationOutput } = require('../validation/schemas');
+const { aiClassificationOutput } = require('../validation/ai.validation');
 
 /** Prompt injection guard: email content is untrusted input. */
 const GUARD = [

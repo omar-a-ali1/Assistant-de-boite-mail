@@ -19,8 +19,8 @@ const loading = ref(false)
 async function onSubmit() {
   error.value = ''
   const password = gmailAppPassword.value.replace(/\s+/g, '')
-  if (!/^[A-Za-z0-9]{16}$/.test(password)) {
-    error.value = 'Le mot de passe d’application Gmail doit contenir 16 caractères.'
+  if (!/^[A-Za-z0-9]{8,}$/.test(password)) {
+    error.value = 'Le mot de passe d’application Gmail doit contenir au moins 8 caractères.'
     return
   }
 
@@ -45,7 +45,7 @@ async function onSubmit() {
     } else if (code === 'GMAIL_ACCOUNT_REQUIRED') {
       error.value = 'Ce compte n’utilise pas une adresse Gmail.'
     } else if (code === 'GMAIL_APP_PASSWORD_INVALID') {
-      error.value = 'Le mot de passe d’application doit contenir exactement 16 caractères.'
+      error.value = 'Le mot de passe d’application doit contenir au moins 8 caractères.'
     } else {
       error.value = err.apiError?.message || 'Connexion Gmail impossible.'
     }
@@ -77,7 +77,7 @@ async function onSubmit() {
               required
             />
             <p class="text-xs text-[var(--color-muted-foreground)]">
-              16 caractères, généré dans votre compte Google avec la validation en deux étapes.
+              Au moins 8 caractères (16 pour un vrai mot de passe Google), généré dans votre compte Google avec la validation en deux étapes.
               Ce n’est pas votre mot de passe Google habituel.
             </p>
           </div>

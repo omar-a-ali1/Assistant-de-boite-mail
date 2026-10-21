@@ -30,8 +30,8 @@ async function onSubmit() {
     return
   }
   const appPassword = gmailAppPassword.value.replace(/\s+/g, '')
-  if (!/^[A-Za-z0-9]{16}$/.test(appPassword)) {
-    error.value = 'Le mot de passe d’application Gmail doit contenir 16 caractères.'
+  if (!/^[A-Za-z0-9]{8,}$/.test(appPassword)) {
+    error.value = 'Le mot de passe d’application Gmail doit contenir au moins 8 caractères.'
     return
   }
   try {
@@ -57,14 +57,14 @@ async function onSubmit() {
       error.value = 'Un compte existe déjà avec cet e-mail.'
     } else if (code === 'GMAIL_AUTH_FAILED') {
       error.value =
-        'Gmail a refusé ces identifiants. Vérifiez l’adresse et le mot de passe d’application (16 caractères).'
+        'Gmail a refusé ces identifiants. Vérifiez l’adresse et le mot de passe d’application (au moins 8 caractères).'
     } else if (code === 'GMAIL_APP_PASSWORD_INVALID') {
-      error.value = 'Le mot de passe d’application doit contenir exactement 16 caractères.'
+      error.value = 'Le mot de passe d’application doit contenir au moins 8 caractères.'
     } else if (code === 'GMAIL_ACCOUNT_REQUIRED') {
       error.value = 'Utilisez une adresse Gmail (@gmail.com).'
     } else if (code === 'VALIDATION_ERROR') {
       error.value =
-        'Vérifiez l’adresse Gmail, le mot de passe (8 caractères minimum) et le mot de passe d’application (16 caractères).'
+        'Vérifiez l’adresse Gmail, le mot de passe (8 caractères minimum) et le mot de passe d’application (au moins 8 caractères).'
     } else {
       error.value = err.apiError?.message || 'Création du compte impossible.'
     }
@@ -127,7 +127,7 @@ async function onSubmit() {
               required
             />
             <p class="text-xs text-[var(--color-muted-foreground)]">
-              16 caractères, généré dans votre compte Google avec la validation en deux étapes.
+              Au moins 8 caractères (16 pour un vrai mot de passe Google), généré dans votre compte Google avec la validation en deux étapes.
               Ce n’est pas votre mot de passe Google habituel.
             </p>
           </div>
